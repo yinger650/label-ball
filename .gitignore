@@ -1,0 +1,34 @@
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtualenv & local work
+venv/
+.venv/
+ball_gt_work/
+collected/
+*.zip
+*.mp4
+*.part
+.packet_cache/
+
+# Secrets — never commit
+credentials.json
+.env
+producer/.env
+*.pem
+aoss.conf
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Logs
+logs/*
+!logs/.gitkeep
+*.log

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>标注中</title>
+<style>
+  :root { --bg:#0f1115; --panel:#1d2027; --line:#2c313b; --fg:#e6e8ec; --dim:#8b93a1;
+          --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --acc:#60a5fa; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+              font:13px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+              overflow:hidden; user-select:none;
+              display:flex; flex-direction:column; }
+  #top { display:flex; align-items:center; gap:16px; padding:8px 14px; flex:none;
+         background:var(--panel); border-bottom:1px solid var(--line); }
+  #top .pid { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--dim); }
+  #top .grow { flex:1; }
+  .pill { padding:3px 10px; border:1px solid var(--line); border-radius:20px; font-size:12px; }
+  .pill.on { background:var(--acc); color:#0b1220; border-color:var(--acc); font-weight:600; }
+  a.btn, button { background:transparent; color:var(--fg); border:1px solid var(--line);
+                  border-radius:6px; padding:5px 12px; font-size:13px; cursor:pointer;
+                  text-decoration:none; }
+  button.primary { background:var(--acc); color:#0b1220; border-color:var(--acc); font-weight:600; }
+
+  /* 上方：全场 1:1，优先撑满宽度；高度随比例走，但给下方至少留 300px */
+  #overview-wrap {
+    flex:none; display:flex; justify-content:center; align-items:center;
+    background:#000; border-bottom:1px solid var(--line);
+    width:100%; padding:4px 0;
+  }
+  #overview { display:block; cursor:crosshair; background:#111; }
+
+  /* 下方：正方形细节，最少 300px 高，有余量则放大 */
+  #stage {
+    flex:1; min-height:300px; display:flex; justify-content:center; align-items:center;
+    background:#0a0b0e; overflow:hidden;
+  }
+  #zoom { cursor:crosshair; display:block; flex:none; background:#000; }
+
+  #help { position:fixed; right:0; bottom:0; background:rgba(16,18,22,.94);
+          border-top:1px solid var(--line); border-left:1px solid var(--line);
+          border-radius:8px 0 0 0; padding:10px 14px; font-size:12px; color:var(--dim);
+          max-width:420px; pointer-events:none; }
+  #help b { color:var(--fg); }
+  kbd { background:#000; border:1px solid var(--line); border-radius:4px;
+        padding:0 5px; font-family:ui-monospace,Menlo,monospace; color:var(--fg); }
+  #toast { position:fixed; left:50%; top:56px; transform:translateX(-50%);
+           background:rgba(16,18,22,.95); border:1px solid var(--line); border-radius:8px;
+           padding:8px 16px; display:none; z-index:5; }
+</style>
+</head>
+<body>
+<div id="top">
+  <span class="pid" id="pid"></span>
+  <span class="pill" id="frameInfo"></span>
+  <span class="pill" id="progress"></span>
+  <span class="pill" id="viewPill">原图</span>
+  <span class="pill" id="statePill"></span>
+  <span class="grow"></span>
+  <button id="prevUnlabeled">上一未标 (K)</button>
+  <button id="nextUnlabeled">下一未标 (J)</button>
+  <button class="primary" id="submit">提交</button>
+  <a class="btn" href="/">返回</a>
+</div>
+<div id="overview-wrap"><canvas id="overview"></canvas></div>
+<div id="stage"><canvas id="zoom"></canvas></div>
+<div id="toast"></div>
+<div id="help">
+  <b>上方全场</b>点选正方形框位置 · <b>下方细节</b>滚轮缩放、右键拖、左键点球心<br>
+  <kbd>W</kbd> 原图/增强 · 空格闪烁 · <kbd>,</kbd><kbd>.</kbd> 拨帧 · <kbd>X</kbd> 看不见 · <kbd>A</kbd><kbd>D</kbd> 标注帧
+</div>
+<script src="/static/js/aoss_client.js"></script>
+<script src="/static/js/annotate.js"></script>
+</body>
+</html>

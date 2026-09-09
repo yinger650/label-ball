@@ -1,0 +1,8 @@
+# 标注服务
+flask>=3.0
+opencv-python-headless>=4.8
+numpy>=1.24
+waitress>=3.0
+
+# 产包 / 回收 / 同步（S3 兼容 AOSS）
+boto3>=1.34

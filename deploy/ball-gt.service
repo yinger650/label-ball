@@ -1,0 +1,19 @@
+[Unit]
+Description=Football ball GT annotation server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ball_gt/server
+Environment=BALL_GT_WORK=/var/lib/ball_gt_work
+Environment=BALL_GT_WORKERS=2
+Environment=BALL_GT_PACKET_MIRROR=/var/lib/ball_gt_packets
+Environment=PYTHONPATH=/opt/ball_gt
+ExecStart=/opt/ball_gt/venv/bin/waitress-serve --listen=127.0.0.1:8780 --threads=6 --channel-timeout=600 app:app
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>足球 GT 标注</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2027; --line:#2c313b; --fg:#e6e8ec; --dim:#8b93a1;
+          --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --acc:#60a5fa; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--dim); margin-bottom:24px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:18px 20px; margin-bottom:16px; }
+  .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  button { background:var(--acc); color:#0b1220; border:0; border-radius:7px;
+           padding:9px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:hover { filter:brightness(1.1); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  .stat { display:flex; gap:26px; flex-wrap:wrap; margin:2px 0 0; }
+  .stat div { text-align:center; }
+  .stat b { display:block; font-size:22px; font-weight:600; }
+  .stat span { color:var(--dim); font-size:12px; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; font-size:12px; }
+  td.pid { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .bar { height:6px; background:#0f1115; border-radius:3px; overflow:hidden; min-width:120px; }
+  .bar i { display:block; height:100%; background:var(--ok); }
+  .tag { font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--line); color:var(--dim); }
+  .err { color:var(--bad); }
+  a { color:var(--acc); }
+  code { background:#0f1115; padding:1px 6px; border-radius:4px; font-size:12px; }
+  label { display:block; color:var(--dim); font-size:12px; margin:8px 0 4px; }
+  input { width:100%; max-width:520px; background:#0f1115; border:1px solid var(--line);
+          color:var(--fg); border-radius:6px; padding:8px 10px; font-size:13px; }
+  .hint { color:var(--dim); font-size:12px; margin-top:8px; }
+</style>
+<script src="/static/js/aoss_client.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>足球 GT 标注</h1>
+  <div class="sub">标注对象是<b>比赛中正在使用的那一个球</b>。场边备用球、球门后的球、看台上的球都不要标。
+    对象存储由<b>你的浏览器</b>直接读写，本站服务器不持有凭证。</div>
+
+  <div class="card" id="credCard">
+    <div class="row" style="justify-content:space-between">
+      <b>设置</b>
+      <button class="ghost" id="toggleCred" type="button">展开 / 收起</button>
+    </div>
+    <div id="credForm" style="display:none;margin-top:8px">
+      <label>标注员名字（写入结果，请用稳定唯一的名字）</label>
+      <input id="who" placeholder="例如 zhangsan" autocomplete="username">
+      <label>AOSS endpoint</label>
+      <input id="endpoint" autocomplete="off">
+      <label>access_key</label>
+      <input id="ak" autocomplete="off">
+      <label>secret_key</label>
+      <input id="sk" type="password" autocomplete="off">
+      <label>bucket / prefix</label>
+      <div class="row">
+        <input id="bucket" style="max-width:200px" placeholder="wangmin">
+        <input id="prefix" style="max-width:200px" placeholder="ball_det/">
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="saveCred" type="button">保存到本机浏览器</button>
+        <span class="hint" id="credHint"></span>
+      </div>
+      <p class="hint">凭证只保存在你浏览器的 localStorage，刷新页面仍在；换电脑需重新填。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <div style="color:var(--dim);font-size:12px">标注员</div>
+        <div id="whoShow" style="font-size:16px">未设置</div>
+      </div>
+      <div class="stat" id="pool"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div><b>我的任务</b> <span class="tag">领取走 AOSS · 包文件由本站镜像提供</span></div>
+      <div class="row">
+        <button id="claim" type="button">领取新任务</button>
+        <button class="ghost" id="refresh" type="button">刷新</button>
+      </div>
+    </div>
+    <div id="msg" style="margin-top:10px"></div>
+    <table id="mine" style="margin-top:12px"><tbody></tbody></table>
+  </div>
+
+  <div class="card">
+    <b>怎么标</b>
+    <ol style="color:var(--dim);margin:8px 0 0;padding-left:22px">
+      <li>先填标注员名字与 AOSS 凭证并保存。</li>
+      <li>点「领取新任务」：浏览器从对象存储下载包并上传到本站做增强（约 1–3 分钟）。</li>
+      <li>点「开始标注」。上方全局条，下方是原生像素视野。</li>
+      <li>球心单击；找不到时 <code>W</code> 增强视图，按住空格与前一帧闪烁；看不见按 <code>X</code>。</li>
+      <li>标完后点「提交」：本站组装 JSON，由浏览器写回对象存储。</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let timer = null;
+let lastPool = null;
+
+function setMsg(t, cls){ $('#msg').innerHTML = t ? `<span class="${cls||''}">${t}</span>` : ''; }
+
+function who() {
+  return BallGtAoss.getWho();
+}
+
+function fillCredForm() {
+  const c = BallGtAoss.loadCred();
+  $('#endpoint').value = c.endpoint || BallGtAoss.DEFAULT_CRED.endpoint;
+  $('#ak').value = c.access_key || '';
+  $('#sk').value = c.secret_key || '';
+  $('#bucket').value = c.bucket || 'wangmin';
+  $('#prefix').value = c.prefix || 'ball_det/';
+  $('#who').value = BallGtAoss.getWho();
+  $('#whoShow').textContent = BallGtAoss.getWho() || '未设置';
+  const ok = !!(c.access_key && c.secret_key && BallGtAoss.getWho());
+  $('#credHint').textContent = ok ? '已配置' : '尚未配置完整';
+  if (!ok) $('#credForm').style.display = 'block';
+}
+
+$('#toggleCred').onclick = () => {
+  const el = $('#credForm');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+$('#saveCred').onclick = () => {
+  const name = $('#who').value.trim();
+  if (!name) { alert('请填写标注员名字'); return; }
+  BallGtAoss.setWho(name);
+  BallGtAoss.saveCred({
+    endpoint: $('#endpoint').value.trim(),
+    access_key: $('#ak').value.trim(),
+    secret_key: $('#sk').value.trim(),
+    bucket: $('#bucket').value.trim() || 'wangmin',
+    prefix: $('#prefix').value.trim() || 'ball_det/',
+  });
+  fillCredForm();
+  setMsg('已保存到本机浏览器');
+  refresh();
+};
+
+async function jpost(u, body) {
+  const r = await fetch(u, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Annotator': who() },
+    body: JSON.stringify(body || {}),
+  });
+  return { ok: r.ok, data: await r.json() };
+}
+
+async function refresh() {
+  if (!who() || !BallGtAoss.loadCred().access_key) {
+    setMsg('请先在上方设置标注员名字与 AOSS 凭证', 'err');
+    return;
+  }
+  try {
+    const p = await BallGtAoss.poolStatus(who());
+    lastPool = p;
+    $('#pool').innerHTML = [
+      ['可领取', p.available.length], ['我的', p.mine.length],
+      ['他人进行中', p.taken.length], ['已完成', p.done.length], ['总包数', p.n_packets],
+    ].map(([k,v]) => `<div><b>${v}</b><span>${k}</span></div>`).join('');
+
+    let local = {};
+    if (p.mine.length) {
+      const { data } = await jpost('/api/local_status', { packet_ids: p.mine });
+      local = (data && data.local) || {};
+    }
+
+    const rows = p.mine.map(pid => {
+      const L = local[pid] || {};
+      const job = L.job || {};
+      let status, action;
+      if (L.ready) {
+        const n = L.n_labeled||0, t = L.n_targets||0;
+        const pct = t ? Math.round(100*n/t) : 0;
+        status = `<div class="bar"><i style="width:${pct}%"></i></div>
+                  <div style="color:var(--dim);font-size:12px">${n}/${t} 帧（${pct}%）</div>`;
+        action = `<a href="/annotate/${pid}"><button type="button">${n?'继续标注':'开始标注'}</button></a>`
+               + (n>=t && t>0 ? ` <button class="ghost" type="button" onclick="submitPacket('${pid}')">提交</button>` : '');
+      } else if (job.state === 'error') {
+        status = `<span class="err">准备失败：${job.msg||''}</span>`;
+        action = `<button class="ghost" type="button" onclick="reingest('${pid}')">重试</button>`;
+      } else if (job.state || L.has_zip) {
+        const pct = job.total ? Math.round(100*job.done/job.total) : 0;
+        status = `<div class="bar"><i style="width:${pct}%;background:var(--warn)"></i></div>
+                  <div style="color:var(--dim);font-size:12px">${job.msg||'准备中…'} ${job.total?pct+'%':''}</div>`;
+        action = '';
+      } else {
+        status = `<span style="color:var(--dim)">已领取，等待下载…</span>`;
+        action = `<button class="ghost" type="button" onclick="reingest('${pid}')">下载并准备</button>`;
+      }
+      return `<tr><td class="pid">${pid}</td><td style="width:40%">${status}</td>
+              <td style="text-align:right">${action}</td></tr>`;
+    });
+    $('#mine tbody').innerHTML = rows.join('') ||
+      '<tr><td style="color:var(--dim)">还没有任务，点右上「领取新任务」</td></tr>';
+
+    const busy = p.mine.some(pid => {
+      const L = local[pid] || {};
+      return !L.ready && (L.job||{}).state !== 'error';
+    });
+    clearTimeout(timer);
+    timer = setTimeout(refresh, busy ? 1500 : 10000);
+  } catch (e) {
+    setMsg('对象存储访问失败：' + (e.message || e), 'err');
+    clearTimeout(timer);
+    timer = setTimeout(refresh, 8000);
+  }
+}
+
+async function downloadAndIngest(pid) {
+  setMsg(`正在从本站镜像加载 ${pid}…`);
+  const r = await fetch('/api/pull/' + encodeURIComponent(pid), {
+    method: 'POST', headers: { 'X-Annotator': who() },
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || 'pull 失败');
+  setMsg(`${pid} 已开始解码 / 生成增强视图（${(data.bytes/1e6).toFixed(1)} MB）`);
+}
+
+async function claim() {
+  if (!who()) { alert('请先设置标注员名字'); return; }
+  $('#claim').disabled = true;
+  setMsg('正在领取…');
+  try {
+    const st = await BallGtAoss.poolStatus(who());
+    const cand = st.available[0];
+    if (!cand) throw new Error('任务池里暂时没有待标注的包');
+    const ok = await BallGtAoss.claim(cand, who());
+    if (!ok) throw new Error('领取失败（可能被他人抢先），请重试');
+    await downloadAndIngest(cand);
+  } catch (e) {
+    setMsg(e.message || String(e), 'err');
+  }
+  $('#claim').disabled = false;
+  refresh();
+}
+
+async function reingest(pid) {
+  try { await downloadAndIngest(pid); } catch (e) { setMsg(e.message || String(e), 'err'); }
+  refresh();
+}
+
+async function submitPacket(pid) {
+  setMsg('正在组装结果…');
+  try {
+    let { ok, data } = await jpost('/api/build_result/' + pid, { annotator: who() });
+    if (!ok && data.missing && confirm(`${data.error}。仍要提交吗？`)) {
+      ({ ok, data } = await jpost('/api/build_result/' + pid, { annotator: who(), force: true }));
+    }
+    if (!ok) throw new Error(data.error || '组装失败');
+    setMsg('正在上传到对象存储…');
+    const key = await BallGtAoss.submitResult(pid, who(), data.result);
+    await jpost('/api/cleanup/' + pid, { key, annotator: who() });
+    setMsg(`已提交 ${pid}（${data.n_labeled} 帧）→ ${key}`);
+  } catch (e) {
+    setMsg(e.message || String(e), 'err');
+  }
+  refresh();
+}
+
+window.submitPacket = submitPacket;
+window.reingest = reingest;
+
+$('#claim').onclick = claim;
+$('#refresh').onclick = refresh;
+fillCredForm();
+refresh();
+</script>
+</body>
+</html>
