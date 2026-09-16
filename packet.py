@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """足球 GT 标注包（packet）的格式定义与读写。
 
-一个 packet = 一路视频的一个时间窗，是标注员一次领取的工作单元。内容只有两样：
+一个 packet = 一路视频的一个时间窗，是标注员一次领取的工作单元。新格式不再打 zip，
+AOSS 上是一组独立对象：
 
-    meta.json    所有上下文信息（场次、ROI、标定、需标注的帧号…）
-    clip.mp4     该时间窗的 ERP 球场 ROI 裁切，原生分辨率
+    packets/{id}/meta.json
+    packets/{id}/clip.mp4          ROI 原生分辨率，约 300 帧 / 10s
+    packets/{id}/dog.mp4           产包端算好的 DoG（灰度内容）
+    packets/{id}/scan_dog.jpg      灰度时间最大投影
+    packets/{id}/scan_time.jpg     时间彩色编码（早=蓝 → 晚=红）
+    packets/{id}/thumb/…           长边 1280 的缩略件，给线上审核
 
-**标注员不需要填写任何信息**——meta.json 里已经有了全部元数据，这是包自带 meta 的
-唯一目的。
+旧 zip（`packets/{id}.zip` = meta + clip）迁移期仍能标，判据是 aoss_key 是否以 `.zip` 结尾。
 
-为什么装 mp4 而不是装好 JPEG 帧序列：连续生产会攒下几百个包，mp4 比等价 JPEG 序列小
-约 5 倍（10s 包约 30 MB vs 150 MB），而本地标注服务无论如何都要依赖 cv2 来算 DoG
-视图，顺带解码是免费的。
-
-为什么 clip 装满窗内每一帧、而标注目标只是其中 1/step：DoG 增强和闪烁对比都需要邻帧，
-只装目标帧的话这两个功能就没了——而它们正是人眼能找到飞行中的球的原因。
+`frame_idx` 仍是**源视频帧号**。clip 第 i 帧 = 源 `frame_start + decim*i`。
 """
 
 from __future__ import annotations
@@ -28,7 +27,54 @@ from typing import Dict, List, Optional, Tuple
 PACKET_VERSION = "1.0"
 META_NAME = "meta.json"
 CLIP_NAME = "clip.mp4"
+DOG_NAME = "dog.mp4"
+SCAN_DOG_NAME = "scan_dog.jpg"
+SCAN_TIME_NAME = "scan_time.jpg"
+THUMB_DIR = "thumb"
 LABELS_NAME = "labels.json"
+CLIP_FPS = 30.0
+THUMB_SIDE = 1280
+
+# 标注端优先下载（先进页），dog 随后
+STAGE1_FILES = (META_NAME, CLIP_NAME, SCAN_DOG_NAME, SCAN_TIME_NAME)
+STAGE2_FILES = (DOG_NAME,)
+THUMB_FILES = (
+    f"{THUMB_DIR}/clip.mp4",
+    f"{THUMB_DIR}/dog.mp4",
+    f"{THUMB_DIR}/scan_dog.jpg",
+    f"{THUMB_DIR}/scan_time.jpg",
+)
+ALL_ARTIFACT_FILES = STAGE1_FILES + STAGE2_FILES + THUMB_FILES
+
+
+def packet_prefix(packet_id: str) -> str:
+    return f"packets/{packet_id}/"
+
+
+def is_zip_key(aoss_key: str) -> bool:
+    k = (aoss_key or "").split("?")[0].rstrip("/")
+    return k.endswith(".zip")
+
+
+def prefix_from_key(aoss_key: str, packet_id: str = "") -> str:
+    """把 lease 的 aoss_key 收成 `packets/{id}/`。zip 键返回空串。"""
+    if is_zip_key(aoss_key):
+        return ""
+    k = (aoss_key or "").strip().strip("/")
+    if not k and packet_id:
+        return packet_prefix(packet_id)
+    if k.endswith(".json"):
+        k = k.rsplit("/", 1)[0] if "/" in k else ""
+    if not k.endswith("/"):
+        k += "/"
+    if not k.startswith("packets/") and packet_id:
+        return packet_prefix(packet_id)
+    return k
+
+
+def choose_decim(fps: float) -> int:
+    """源 ≥50 fps 走精确 2:1 抽帧，其余不重采样。"""
+    return 2 if float(fps) >= 50.0 else 1
 
 
 def make_packet_id(group: str, stem: str, start_sec: float, end_sec: float) -> str:
@@ -74,6 +120,9 @@ class PacketMeta:
     version: str = PACKET_VERSION
     kind: str = "ball_gt_packet"
     notes: Dict[str, object] = field(default_factory=dict)
+    decim: int = 1  # clip 第 i 帧 = 源 frame_start + decim*i
+    clip_fps: float = CLIP_FPS
+    artifacts: Dict[str, object] = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(self.__dict__, ensure_ascii=False)
@@ -81,6 +130,10 @@ class PacketMeta:
     @staticmethod
     def from_dict(d: dict) -> "PacketMeta":
         known = {k: d[k] for k in PacketMeta.__dataclass_fields__ if k in d}
+        if "decim" in known:
+            known["decim"] = max(1, int(known["decim"] or 1))
+        if "artifacts" in known and not isinstance(known["artifacts"], dict):
+            known["artifacts"] = {}
         return PacketMeta(**known)
 
     @property
@@ -88,7 +141,12 @@ class PacketMeta:
         return len(self.targets)
 
     def clip_index(self, frame_idx: int) -> int:
-        return frame_idx - self.frame_start
+        d = max(1, int(self.decim or 1))
+        return (int(frame_idx) - int(self.frame_start)) // d
+
+    def source_frame(self, clip_i: int) -> int:
+        d = max(1, int(self.decim or 1))
+        return int(self.frame_start) + int(clip_i) * d
 
 
 def write_packet(zip_path: Path, meta: PacketMeta, clip_path: Path) -> Path:

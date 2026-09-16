@@ -1,0 +1,152 @@
+# 视觉模型供应商配置。
+#
+# **这个文件里永远不出现 key 本身，只出现环境变量名。** 值放在仓库根 `.env`
+# （已被 .gitignore 挡住），`client/vlm.py` 启动时自动读进 os.environ。
+#
+# 三家都走 OpenAI 兼容 /chat/completions。`extra_body` 里的关思考字段各家写法不同，
+# 写错了会 400；vlm.py 会把被拒的键单独摘掉重试，所以这里可以放心地都写上。
+
+providers:
+  glm_flash:
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    model: glm-4.6v-flash
+    api_key_env: GLM_KEY
+    max_concurrency: 3
+    rpm: 90
+    timeout: 90
+    max_tokens: 192
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 永久免费，跑量首选；免费池经常 429（code 1305），务必配降级
+
+  glm45v:
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    model: glm-4.5v
+    api_key_env: GLM_KEY
+    max_concurrency: 4
+    rpm: 120
+    timeout: 90
+    max_tokens: 192
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 关思考后约 0.7s/次，实测最快；跑量的实际主力
+
+  glm:
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    model: glm-4.6v
+    api_key_env: GLM_KEY
+    max_concurrency: 3
+    rpm: 60
+    timeout: 90
+    max_tokens: 192
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 低置信时当 voter
+
+  glm53_flash:
+    # token / Coding Plan 必须走 /api/coding/paas/v4，按量地址 /api/paas/v4 会 1113
+    base_url: https://open.bigmodel.cn/api/coding/paas/v4
+    model: glm-5.3-flash
+    api_key_env: GLM_KEY
+    max_concurrency: 3
+    rpm: 60
+    timeout: 120
+    max_tokens: 1024
+    image_format: png
+    extra_body:
+      reasoning_effort: low
+    notes: Coding Plan 专用网关；关不了思考，reasoning_effort=low
+
+  glm5v_turbo:
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    model: glm-5v-turbo
+    api_key_env: GLM_KEY
+    max_concurrency: 3
+    rpm: 60
+    timeout: 90
+    max_tokens: 256
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 智谱视觉 turbo，可关思考
+
+  doubao_vision:
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    model: doubao-seed-1-6-vision-250815
+    api_key_env: ARK_KEY
+    max_concurrency: 2
+    rpm: 40
+    timeout: 120
+    max_tokens: 256
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 火山方舟豆包视觉；key 用 ARK_KEY
+
+  doubao_mini:
+    base_url: https://ark.cn-beijing.volces.com/api/v3
+    model: doubao-seed-2-0-mini-260428
+    api_key_env: ARK_KEY
+    max_concurrency: 3
+    rpm: 60
+    timeout: 90
+    max_tokens: 256
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 豆包 Seed 2.0 mini，比 1.6-vision 快，本机已通
+
+  minimax:
+    base_url: https://api.minimaxi.com/v1
+    model: MiniMax-M3
+    api_key_env: MINIMAX_KEY
+    max_concurrency: 2
+    rpm: 40
+    timeout: 120
+    max_tokens: 192
+    image_format: png
+    # 小目标必须要 high：默认档会把图压到看不见球
+    detail: high
+    extra_body:
+      thinking: {type: disabled}
+    notes: 只有 thinking.type=disabled 有效，enable_thinking=false 不管用；也支持 video_url
+
+  deepseek:
+    base_url: https://api.deepseek.com
+    model: deepseek-v4-flash-vision-exp
+    api_key_env: DEEPSEEK_KEY
+    max_concurrency: 2
+    rpm: 40
+    timeout: 120
+    max_tokens: 192
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 每图 384 token 上限，细化阶段别指望
+
+  deepseek_text:
+    base_url: https://api.deepseek.com
+    model: deepseek-v4-pro
+    api_key_env: DEEPSEEK_KEY
+    max_concurrency: 2
+    rpm: 40
+    timeout: 120
+    max_tokens: 512
+    extra_body:
+      thinking: {type: disabled}
+    notes: 纯文本，轨迹合理性复核用
+
+# 工作流按角色引用供应商，列表即降级顺序：前面的失败就换后面的。
+# glm45v 排第一（实测更快）；免费的 glm_flash 常年 429，放第二当备胎。
+roles:
+  # glm45v 在前而不是免费的 glm_flash：实测 glm_flash 的免费池常年 429（8 次里挂 5 次），
+  # 每次失败都要走一轮退避，整包跑下来比直接用 glm45v 慢好几倍。免费省下的那点钱
+  # 抵不过等待的时间，把它放第二位当备胎就够了。
+  primary: [glm45v, glm_flash, glm, minimax, glm5v_turbo, glm53_flash, doubao_mini, doubao_vision]
+  fallback: [glm45v, glm, minimax, glm5v_turbo, doubao_mini]
+  voter: [glm, minimax, glm5v_turbo]
+  coarse: [glm45v, glm_flash, glm, minimax, glm5v_turbo, glm53_flash, doubao_mini, doubao_vision]
+  text: [deepseek_text, glm]

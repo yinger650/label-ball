@@ -1,0 +1,5 @@
+# MCP 客户端本机：解码 + DoG + 下载 packet zip
+opencv-python-headless>=4.8
+numpy>=1.24
+pillow>=10.0
+boto3>=1.34

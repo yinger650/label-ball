@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>逐步点选调试</title>
+<style>
+  :root { --bg:#0f1115; --panel:#1d2027; --line:#2c313b; --fg:#e6e8ec; --dim:#8b93a1;
+          --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --acc:#60a5fa; --human:#c4b5fd; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+               font:13px/1.45 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  #app { display:flex; flex-direction:column; height:100%; }
+  header { display:flex; align-items:center; gap:10px; padding:8px 12px; flex:none;
+           background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:14px; font-weight:600; margin:0; white-space:nowrap; }
+  header .grow { flex:1; }
+  select, input[type=number] { background:#111; color:var(--fg); border:1px solid var(--line);
+           border-radius:6px; padding:5px 8px; font-size:13px; }
+  button { background:transparent; color:var(--fg); border:1px solid var(--line);
+           border-radius:6px; padding:5px 11px; font-size:13px; cursor:pointer; }
+  button.primary { background:var(--acc); color:#0b1220; border-color:var(--acc); font-weight:600; }
+  button.human { background:var(--human); color:#1a1028; border-color:var(--human); font-weight:600; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .pill { padding:2px 8px; border:1px solid var(--line); border-radius:12px; font-size:12px; color:var(--dim); }
+  .pill.ok { color:var(--ok); border-color:#265; } .pill.bad { color:var(--bad); border-color:#622; }
+  .pill.warn { color:var(--warn); border-color:#653; }
+  .body { flex:1; display:grid; grid-template-columns:280px 1fr 320px; min-height:0; }
+  .col { overflow:auto; border-right:1px solid var(--line); padding:10px 12px; }
+  .col.mid { padding:0; display:flex; flex-direction:column; min-width:0; }
+  #prompt { white-space:pre-wrap; font-size:12px; background:#111; border:1px solid var(--line);
+            border-radius:8px; padding:10px; max-height:22vh; overflow:auto; }
+  #think { white-space:pre-wrap; font-size:12px; background:#1a1610; border:1px solid #8a5a18;
+            color:#f5d78a; border-radius:8px; padding:10px; max-height:32vh; overflow:auto;
+            min-height:4em; }
+  #think.empty { color:var(--dim); background:#111; border-color:var(--line); }
+  .sug .think {
+    white-space:pre-wrap; font-size:12px; background:#1a1610; border:1px solid #8a5a18;
+    color:#f5d78a; border-radius:6px; padding:8px 10px; margin-top:6px; max-height:28vh; overflow:auto;
+  }
+  .sug .ans { white-space:pre-wrap; font-size:11px; color:var(--dim); margin-top:4px; }
+  #stageWrap { position:relative; flex:1; display:flex; justify-content:center; align-items:flex-start;
+               background:#0a0b0e; min-height:240px; overflow:auto; }
+  #grids { display:flex; flex-direction:column; align-items:center; gap:14px; padding:10px 8px; width:100%; }
+  #grids .strip { display:flex; flex-direction:column; align-items:center; width:100%; }
+  #grids .strip .cap { color:var(--dim); font-size:12px; padding:2px 0 6px; }
+  #grids canvas { display:block; max-width:100%; width:auto; height:auto; cursor:crosshair; background:#000; }
+  .col:last-child { border-right:0; }
+  h2 { font-size:12px; color:var(--dim); font-weight:600; margin:0 0 8px;
+       text-transform:uppercase; letter-spacing:.04em; }
+  .stage { padding:6px 8px; border:1px solid var(--line); border-radius:6px; margin:0 0 6px;
+           border-left:3px solid #333; }
+  .stage.skip { opacity:.55; } .stage.ok { border-left-color:var(--ok); }
+  .stage.cur { border-left-color:var(--acc); background:#18202c; }
+  .stage.null { border-left-color:var(--warn); } .stage.fail { border-left-color:var(--bad); }
+  .stage .id { font-weight:600; }
+  .stage .meta { color:var(--dim); font-size:11px; }
+  #hint { color:var(--dim); font-size:12px; padding:6px 0; text-align:center; }
+  #ov { width:100%; display:block; background:#000; border-radius:4px; }
+  .sug { border:1px solid var(--line); border-radius:6px; padding:7px 8px; margin:0 0 6px; }
+  .sug b { font-family:ui-monospace,Menlo,monospace; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+  kbd { background:#000; border:1px solid var(--line); border-radius:4px; padding:0 5px; }
+  .warnbox { background:#2a1c10; border:1px solid #653; color:var(--warn); border-radius:6px;
+             padding:8px; margin:8px 0; font-size:12px; }
+  .okbox { background:#102016; border:1px solid #265; color:var(--ok); border-radius:6px;
+           padding:8px; margin:8px 0; font-size:12px; }
+  #toast { position:fixed; left:50%; top:52px; transform:translateX(-50%); display:none;
+           background:rgba(16,18,22,.95); border:1px solid var(--line); border-radius:8px;
+           padding:8px 16px; z-index:5; }
+  .empty { color:var(--dim); padding:20px 0; }
+  label.chk { color:var(--dim); font-size:12px; display:flex; gap:6px; align-items:center; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>逐步点选调试</h1>
+    <select id="packet"></select>
+    <label class="chk" title="0 = 无先验，从整幅 ROI 找球（多数包是这样）">种子帧 <input id="seed" type="number" min="0" max="8" value="0" style="width:52px"></label>
+    <button class="primary" id="open">打开</button>
+    <span class="pill" id="wfPill"></span>
+    <span class="pill" id="framePill"></span>
+    <span class="grow"></span>
+    <select id="model"></select>
+    <button id="ask">让模型点选</button>
+    <button id="compare">对比已配置模型</button>
+    <button class="human" id="nullBtn">找不到 (X)</button>
+    <button id="undoBtn">回退 (Z)</button>
+    <button class="primary" id="next">下一帧 (N)</button>
+    <label class="chk"><input type="checkbox" id="showGt"> 显示 GT</label>
+  </header>
+  <div class="body">
+    <div class="col" id="left">
+      <h2>阶段</h2>
+      <div id="stages"></div>
+      <h2 style="margin-top:16px">这一级提示词</h2>
+      <div id="prompt" class="empty">打开一个包。人看到的字和模型完全一样。</div>
+      <h2 style="margin-top:16px">模型思考过程</h2>
+      <div id="think" class="empty">还没有。点「让模型点选」后，思考会整段印在这里。</div>
+    </div>
+    <div class="col mid">
+      <div id="hint">默认无种子：三张 1:1 大图（左/中/右）点球。点错了按 Z 回退。有种子才会从外推小窗起跑。</div>
+      <div id="stageWrap"><div id="grids"></div></div>
+    </div>
+    <div class="col">
+      <h2>ROI 总览</h2>
+      <img id="ov" alt="overview">
+      <div id="flags"></div>
+      <h2 style="margin-top:14px">模型点选</h2>
+      <div id="sugs" class="empty">还没有。选一个模型点「让模型点选」，或「对比已配置模型」。</div>
+      <h2 style="margin-top:14px">快捷键</h2>
+      <div style="color:var(--dim); font-size:12px;">
+        单击画面 = 提交这一级（初选三张大图用点击坐标，细化级点球心所在的格）<br>
+        <kbd>X</kbd> 找不到　<kbd>Z</kbd> 回退　<kbd>N</kbd> 下一帧　<kbd>M</kbd> 问当前模型<br>
+        <kbd>←↑↓→</kbd> 局部窗挪一格　<kbd>G</kbd> 显示/隐藏 GT
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script src="/static/js/lab.js?v=10"></script>
+</body>
+</html>

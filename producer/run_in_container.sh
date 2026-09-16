@@ -28,4 +28,24 @@ else
 fi
 echo "[env] python: $PY"
 
+# submit.sh 在 ACP 返回 pt-* 之后才把 BALL_GT_JOB_ID 写进 sidecar。
+# 作业可能已经 PENDING→RUNNING，这里等几秒，好让心跳带上真正的 pt-*。
+if [[ -n "${BALL_GT_JOB_ENV_FILE:-}" ]]; then
+    for _i in $(seq 1 60); do
+        if [[ -f "$BALL_GT_JOB_ENV_FILE" ]]; then
+            set -a
+            # shellcheck disable=SC1090
+            source "$BALL_GT_JOB_ENV_FILE"
+            set +a
+            [[ -n "${BALL_GT_JOB_ID:-}" ]] && break
+        fi
+        sleep 1
+    done
+    if [[ -n "${BALL_GT_JOB_ID:-}" ]]; then
+        echo "[env] BALL_GT_JOB_ID=$BALL_GT_JOB_ID"
+    else
+        echo "[env] sidecar 里还没有 BALL_GT_JOB_ID，将回退 hostname-pid"
+    fi
+fi
+
 exec env PYTHONPATH="$ROOT" "$PY" "$ROOT/producer/make_packets.py" "$@"

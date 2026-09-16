@@ -83,8 +83,17 @@ def qc(result: dict, fps: float) -> dict:
     jumps = sum(1 for s in speeds if s > 220)
     if jumps > max(2, 0.05 * len(speeds)):
         flags.append(f"{jumps} 处帧间位移 >220 px/帧（疑似标到了另一个球）")
-    if speeds and st.median(speeds) < 0.4 and len(vis) > 20:
+    # 阈值用「每源帧 px」。0.4 太紧：VLM 在静止备用球上仍有 1–2 px 抖动，线上
+    # 整包通过率 0 的那批几乎全没打上这面旗。2.0（step=3 时约 6 px/格）仍远低于
+    # 带球走的位移，能把「锁死场边球 / 场外灯」挑出来。
+    if speeds and st.median(speeds) < 2.0 and len(vis) > 20:
         flags.append("位置几乎不动（疑似标成了场边备用球）")
+    if vis and len(vis) > 20:
+        xs = [float(r["pano_x"]) for r in vis]
+        ys = [float(r["pano_y"]) for r in vis]
+        span = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+        if span < 80:
+            flags.append(f"整段轨迹跨度仅 {span:.0f} px（疑似锁死静止目标）")
 
     return {
         "n_labeled": len(labels),

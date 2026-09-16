@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "ball-label": {
+      "command": "REPLACE_WITH_ABS_PATH/venv/bin/python",
+      "args": [
+        "-m", "client.mcp_server",
+        "--server", "https://ballgt.yinger650.com",
+        "--worker", "你的名字"
+      ],
+      "env": {
+        "PYTHONPATH": "REPLACE_WITH_ABS_PATH",
+        "BALL_AI_WORK": "/home/你/.cache/ball_ai/work"
+      }
+    }
+  }
+}

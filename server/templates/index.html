@@ -2,286 +2,1164 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>足球 GT 标注</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>足球 GT 看板</title>
 <style>
   :root { --bg:#14161a; --panel:#1d2027; --line:#2c313b; --fg:#e6e8ec; --dim:#8b93a1;
-          --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --acc:#60a5fa; }
+          --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --acc:#60a5fa;
+          --idle:#7d93b3; --vio:#a78bfa; --pink:#f472b6; --cyan:#22d3ee; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg);
          font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
-  .wrap { max-width:1000px; margin:0 auto; padding:28px 20px 60px; }
+  .wrap { max-width:1400px; margin:0 auto; padding:24px 20px 60px; }
   h1 { font-size:20px; margin:0 0 4px; }
-  .sub { color:var(--dim); margin-bottom:24px; }
+  .sub { color:var(--dim); }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
           padding:18px 20px; margin-bottom:16px; }
   .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .hd { justify-content:space-between; margin-bottom:4px; }
   button { background:var(--acc); color:#0b1220; border:0; border-radius:7px;
-           padding:9px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+           padding:8px 16px; font-size:13px; font-weight:600; cursor:pointer; }
   button:hover { filter:brightness(1.1); }
   button:disabled { opacity:.45; cursor:not-allowed; }
   button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  button.ghost.on { border-color:var(--acc); color:var(--acc); }
+  button.sm { padding:5px 11px; font-size:12px; font-weight:500; }
   .stat { display:flex; gap:26px; flex-wrap:wrap; margin:2px 0 0; }
-  .stat div { text-align:center; }
+  .stat div { text-align:center; min-width:74px; }
   .stat b { display:block; font-size:22px; font-weight:600; }
   .stat span { color:var(--dim); font-size:12px; }
+  .stat em { display:block; color:var(--dim); font-size:11px; font-style:normal; }
   table { width:100%; border-collapse:collapse; }
-  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
-  th { color:var(--dim); font-weight:500; font-size:12px; }
-  td.pid { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
-  .bar { height:6px; background:#0f1115; border-radius:3px; overflow:hidden; min-width:120px; }
+  th,td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  th { color:var(--dim); font-weight:500; font-size:12px; white-space:nowrap; }
+  td.pid { font-family:ui-monospace,Menlo,monospace; font-size:12px; white-space:nowrap; }
+  /* 列多，窄屏下不给最小宽度会把每一列都压成折行的碎块，宁可横向滚 */
+  .pktable { min-width:1180px; }
+  tbody tr:hover { background:#22262f; }
+  tbody tr.sel td { background:#243044; }
+  th.chk, td.chk { width:28px; padding-right:0; }
+  input[type=checkbox] { width:15px; height:15px; accent-color:var(--acc); cursor:pointer; }
+  .bar { height:6px; background:#0f1115; border-radius:3px; overflow:hidden; min-width:90px; }
   .bar i { display:block; height:100%; background:var(--ok); }
-  .tag { font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--line); color:var(--dim); }
+  .tag { font-size:11px; padding:2px 8px; border-radius:20px; border:1px solid var(--line);
+         color:var(--dim); white-space:nowrap; display:inline-block; }
+  .tag.qc { border-color:var(--warn); color:var(--warn); }
   .err { color:var(--bad); }
-  a { color:var(--acc); }
-  code { background:#0f1115; padding:1px 6px; border-radius:4px; font-size:12px; }
-  label { display:block; color:var(--dim); font-size:12px; margin:8px 0 4px; }
-  input { width:100%; max-width:520px; background:#0f1115; border:1px solid var(--line);
-          color:var(--fg); border-radius:6px; padding:8px 10px; font-size:13px; }
-  .hint { color:var(--dim); font-size:12px; margin-top:8px; }
+  .dim { color:var(--dim); }
+  a { color:var(--acc); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  code { background:#0f1115; padding:1px 6px; border-radius:4px; font-size:12px;
+         font-family:ui-monospace,Menlo,monospace; }
+  input { background:#0f1115; border:1px solid var(--line); color:var(--fg);
+          border-radius:6px; padding:7px 10px; font-size:13px; }
+  .hint { color:var(--dim); font-size:12px; }
+  .sep { border:0; border-top:1px solid var(--line); margin:16px 0; }
+  .empty { color:var(--dim); padding:22px 4px; text-align:center; font-size:13px; }
+
+  /* 告警条：数量不定，堆在页面最顶上，颜色分级 */
+  .alert { border-radius:9px; padding:10px 14px; margin-bottom:10px; font-size:13px;
+           display:flex; gap:10px; align-items:flex-start; }
+  .alert.bad { background:#3a1d20; border:1px solid #6b2b30; color:#fecaca; }
+  .alert.warn { background:#3a3118; border:1px solid #6b5722; color:#fde68a; }
+  .alert b { flex:0 0 auto; }
+
+  /* 图表：canvas 宽度交给 CSS，高度固定，绘制时按 devicePixelRatio 放大 */
+  .chartbox { position:relative; margin-top:8px; }
+  .chartbox canvas { display:block; width:100%; height:230px; }
+  .tip { position:absolute; display:none; pointer-events:none; z-index:5;
+         background:#0f1115ee; border:1px solid var(--line); border-radius:7px;
+         padding:7px 10px; font-size:12px; line-height:1.7; white-space:nowrap; }
+  .tip i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:6px; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:6px; }
+  .lg { font-size:12px; color:var(--fg); cursor:pointer; user-select:none; }
+  .lg.off { color:var(--dim); opacity:.5; text-decoration:line-through; }
+  .lg i { display:inline-block; width:15px; height:3px; border-radius:2px;
+          margin-right:6px; vertical-align:middle; }
+  .lg i.d { height:0; background:transparent !important; border-top:3px dotted; border-radius:0; }
+
+  /* 帧级通过率是全站最重要的数字，单独做成大号色块 */
+  .rate { font-size:17px; font-weight:700; padding:2px 10px; border-radius:6px;
+          display:inline-block; }
+
+  .jobs { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:12px; }
+  .job { background:#191c22; border:1px solid var(--line); border-radius:9px; padding:12px 14px; }
+  .job .jh { display:flex; align-items:center; gap:8px; justify-content:space-between; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex:0 0 auto; }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin-top:8px; font-size:12px; }
+  .kv dt { color:var(--dim); }
+  .kv dd { margin:0; overflow-wrap:anywhere; }
+  .evts { margin-top:10px; border-top:1px solid var(--line); padding-top:8px;
+          max-height:280px; overflow:auto; font-size:12px; }
+  .evt { display:grid; grid-template-columns:96px 68px 1fr; gap:8px; padding:2px 0; }
+  .evt .t { color:var(--dim); font-family:ui-monospace,Menlo,monospace; }
+  .evt .m { overflow-wrap:anywhere; }
 </style>
-<script src="/static/js/aoss_client.js"></script>
 </head>
 <body>
 <div class="wrap">
-  <h1>足球 GT 标注</h1>
-  <div class="sub">标注对象是<b>比赛中正在使用的那一个球</b>。场边备用球、球门后的球、看台上的球都不要标。
-    对象存储由<b>你的浏览器</b>直接读写，本站服务器不持有凭证。</div>
-
-  <div class="card" id="credCard">
-    <div class="row" style="justify-content:space-between">
-      <b>设置</b>
-      <button class="ghost" id="toggleCred" type="button">展开 / 收起</button>
+  <div class="row hd" style="align-items:flex-start">
+    <div>
+      <h1>足球 GT 看板</h1>
+      <div class="sub">只读监控：包在哪一步 · AI 到底能不能用 · 采集端还活着吗。
+        人工标注在标注员本机的 <code>client/manual.py</code> 里做，本页不领包。</div>
     </div>
-    <div id="credForm" style="display:none;margin-top:8px">
-      <label>标注员名字（写入结果，请用稳定唯一的名字）</label>
-      <input id="who" placeholder="例如 zhangsan" autocomplete="username">
-      <label>AOSS endpoint</label>
-      <input id="endpoint" autocomplete="off">
-      <label>access_key</label>
-      <input id="ak" autocomplete="off">
-      <label>secret_key</label>
-      <input id="sk" type="password" autocomplete="off">
-      <label>bucket / prefix</label>
-      <div class="row">
-        <input id="bucket" style="max-width:200px" placeholder="wangmin">
-        <input id="prefix" style="max-width:200px" placeholder="ball_det/">
-      </div>
-      <div class="row" style="margin-top:12px">
-        <button id="saveCred" type="button">保存到本机浏览器</button>
-        <span class="hint" id="credHint"></span>
-      </div>
-      <p class="hint">凭证只保存在你浏览器的 localStorage，刷新页面仍在；换电脑需重新填。</p>
+    <div class="row">
+      <a href="/review"><button class="ghost" type="button">审核队列</button></a>
+      <button id="refresh" type="button">刷新</button>
+      <span class="hint" id="lastAt">尚未刷新</span>
     </div>
   </div>
 
+  <div id="banner" style="margin-top:16px"></div>
+
   <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <div>
-        <div style="color:var(--dim);font-size:12px">标注员</div>
-        <div id="whoShow" style="font-size:16px">未设置</div>
-      </div>
-      <div class="stat" id="pool"></div>
-    </div>
+    <div class="stat" id="counts"></div>
+    <hr class="sep">
+    <div class="stat" id="gtStat"></div>
+    <div id="coldStart"></div>
   </div>
 
   <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <div><b>我的任务</b> <span class="tag">领取走 AOSS · 包文件由本站镜像提供</span></div>
-      <div class="row">
-        <button id="claim" type="button">领取新任务</button>
-        <button class="ghost" id="refresh" type="button">刷新</button>
-      </div>
+    <div class="row hd">
+      <div><b>吞吐</b> <span class="hint">入库 GT 帧数量级远大于其它序列，单独走右轴</span></div>
+      <div class="row" id="winBtns"></div>
     </div>
-    <div id="msg" style="margin-top:10px"></div>
-    <table id="mine" style="margin-top:12px"><tbody></tbody></table>
+    <div class="legend" id="tpLegend"></div>
+    <div class="chartbox"><canvas id="tpChart"></canvas><div class="tip" id="tpTip"></div></div>
   </div>
 
   <div class="card">
-    <b>怎么标</b>
-    <ol style="color:var(--dim);margin:8px 0 0;padding-left:22px">
-      <li>先填标注员名字与 AOSS 凭证并保存。</li>
-      <li>点「领取新任务」：浏览器从对象存储下载包并上传到本站做增强（约 1–3 分钟）。</li>
-      <li>点「开始标注」。上方全局条，下方是原生像素视野。</li>
-      <li>球心单击；找不到时 <code>W</code> 增强视图，按住空格与前一帧闪烁；看不见按 <code>X</code>。</li>
-      <li>标完后点「提交」：本站组装 JSON，由浏览器写回对象存储。</li>
-    </ol>
+    <div class="row hd">
+      <div><b>审核通过率</b> <span class="hint">按模型 × 工作流。帧级通过率 = 通过帧 /（通过帧 + 打回帧）</span></div>
+    </div>
+    <div id="rateWrap"></div>
+  </div>
+
+  <div class="card">
+    <div class="row hd">
+      <div><b>采集端</b> <span class="hint">池深走左轴，生产 / 消费速率（个/小时）走右轴</span></div>
+      <span class="hint" id="poolHint"></span>
+    </div>
+    <div class="legend" id="poolLegend"></div>
+    <div class="chartbox"><canvas id="poolChart"></canvas><div class="tip" id="poolTip"></div></div>
+    <div class="stat" id="poolKpi" style="margin-top:16px"></div>
+    <hr class="sep">
+    <div id="producers"></div>
+  </div>
+
+  <div class="card">
+    <div class="row hd">
+      <div><b>包列表</b> <span class="hint" id="pkHint"></span></div>
+      <input id="q" placeholder="搜索 packet_id…" style="width:260px" autocomplete="off">
+    </div>
+    <div class="row" id="stateBtns" style="margin:12px 0 4px"></div>
+    <div class="row" id="pkBulk" style="margin:8px 0 4px;display:none">
+      <button type="button" class="ghost sm" id="pkSelAll">全选本页</button>
+      <button type="button" class="ghost sm" id="pkRequeue" disabled>打回待标注</button>
+      <span class="hint" id="pkSelHint">勾选待修复包，可一次打回待标注池</span>
+    </div>
+    <div id="pkWrap"></div>
+    <div class="row" id="pager" style="margin-top:12px;justify-content:flex-end"></div>
   </div>
 </div>
 
 <script>
+'use strict';
+
 const $ = (s) => document.querySelector(s);
-let timer = null;
-let lastPool = null;
 
-function setMsg(t, cls){ $('#msg').innerHTML = t ? `<span class="${cls||''}">${t}</span>` : ''; }
+const REFRESH_MS = 15000;
 
-function who() {
-  return BallGtAoss.getWho();
-}
-
-function fillCredForm() {
-  const c = BallGtAoss.loadCred();
-  $('#endpoint').value = c.endpoint || BallGtAoss.DEFAULT_CRED.endpoint;
-  $('#ak').value = c.access_key || '';
-  $('#sk').value = c.secret_key || '';
-  $('#bucket').value = c.bucket || 'wangmin';
-  $('#prefix').value = c.prefix || 'ball_det/';
-  $('#who').value = BallGtAoss.getWho();
-  $('#whoShow').textContent = BallGtAoss.getWho() || '未设置';
-  const ok = !!(c.access_key && c.secret_key && BallGtAoss.getWho());
-  $('#credHint').textContent = ok ? '已配置' : '尚未配置完整';
-  if (!ok) $('#credForm').style.display = 'block';
-}
-
-$('#toggleCred').onclick = () => {
-  const el = $('#credForm');
-  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+const S = {
+  hours: 24,
+  stats: null,
+  prod: null,
+  packets: null,
+  errors: [],          // 本轮刷新里各接口的报错，渲染成顶部红条而不是静默吞掉
+  hidden: new Set(),   // 被图例点掉的序列 key
+  openJobs: new Set(), // 展开了事件时间线的 job_id
+  pkState: 'all',
+  pkQ: '',
+  pkOffset: 0,
+  pkLimit: 50,
+  pkSelected: new Set(),
+  lastAt: null,
+  busy: false,
+  timer: null,
 };
 
-$('#saveCred').onclick = () => {
-  const name = $('#who').value.trim();
-  if (!name) { alert('请填写标注员名字'); return; }
-  BallGtAoss.setWho(name);
-  BallGtAoss.saveCred({
-    endpoint: $('#endpoint').value.trim(),
-    access_key: $('#ak').value.trim(),
-    secret_key: $('#sk').value.trim(),
-    bucket: $('#bucket').value.trim() || 'wangmin',
-    prefix: $('#prefix').value.trim() || 'ball_det/',
-  });
-  fillCredForm();
-  setMsg('已保存到本机浏览器');
-  refresh();
+const PK_LIMIT_OPTS = [50, 100, 200];
+
+/* 时间窗与桶数分开定，是为了让每个桶落在整点友好的粒度上：
+ * 6h→10min、24h→30min、7d→2h。服务端 buckets 上限 288。 */
+const WINDOWS = [
+  { hours: 6, buckets: 36, label: '6 小时' },
+  { hours: 24, buckets: 48, label: '24 小时' },
+  { hours: 168, buckets: 84, label: '7 天' },
+];
+
+const STATES = [
+  ['all', '全部', 'var(--fg)'],
+  ['available', '可领取', 'var(--acc)'],
+  ['leased', '已领取', 'var(--warn)'],
+  ['submitted', '待审', 'var(--vio)'],
+  ['accepted', '已入库', 'var(--ok)'],
+  ['need_human', '待人工修补', 'var(--bad)'],
+  ['archived', '已归档', 'var(--dim)'],
+];
+const STATE_MAP = Object.fromEntries(STATES.map(([k, label, color]) => [k, { label, color }]));
+
+const HEALTH = {
+  running: { label: '运行中', color: 'var(--ok)' },
+  idle: { label: '空闲', color: 'var(--idle)' },
+  stale: { label: '心跳超时', color: 'var(--warn)' },
+  failed: { label: '失败', color: 'var(--bad)' },
+  gone: { label: '已消失', color: 'var(--dim)' },
 };
 
-async function jpost(u, body) {
-  const r = await fetch(u, {
+/* canvas 的 strokeStyle / fillStyle 不解析 CSS 变量，写 var(--acc) 会被静默忽略、
+ * 沿用上一次的颜色，曲线全画成灰的。所以画在 canvas 上的颜色一律用字面量。 */
+const C = {
+  acc: '#60a5fa', ok: '#4ade80', warn: '#fbbf24', bad: '#f87171',
+  dim: '#8b93a1', vio: '#a78bfa', pink: '#f472b6', cyan: '#22d3ee',
+};
+
+const EVT_COLOR = {
+  start: 'var(--acc)', progress: 'var(--dim)', produced: 'var(--ok)',
+  error: 'var(--bad)', acp_state: 'var(--warn)', exit: 'var(--vio)',
+};
+
+/* ---------------------------------------------------------------- 工具 */
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (m) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+/* 服务端对「没有提交的包」把一整串字段都给 null，直接算数会满屏 NaN。
+ * 所有取数一律过这几个格式化函数，拿不到就显示破折号。 */
+function isNum(v) { return typeof v === 'number' && isFinite(v); }
+function n0(v) { return isNum(v) ? v : 0; }
+function dash(v) { return isNum(v) ? String(v) : '<span class="dim">—</span>'; }
+
+function pct(v, digits) {
+  return isNum(v) ? (v * 100).toFixed(digits === undefined ? 1 : digits) + '%' : '—';
+}
+
+function fmtNum(v) {
+  if (!isNum(v)) return '0';
+  const a = Math.abs(v);
+  if (a >= 10000) return (v / 1000).toFixed(0) + 'k';
+  if (a >= 1000) return (v / 1000).toFixed(1) + 'k';
+  if (a >= 10 || v === 0) return String(Math.round(v));
+  return String(Math.round(v * 10) / 10);
+}
+
+function p2(n) { return String(n).padStart(2, '0'); }
+
+function fmtTs(ts) {
+  if (!isNum(ts) || ts <= 0) return '—';
+  const d = new Date(ts * 1000);
+  return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
+function fmtAge(sec) {
+  if (!isNum(sec) || sec < 0) return '—';
+  if (sec < 60) return Math.round(sec) + ' 秒';
+  if (sec < 3600) return Math.round(sec / 60) + ' 分';
+  const h = Math.floor(sec / 3600);
+  return h + ' 时 ' + Math.round((sec - h * 3600) / 60) + ' 分';
+}
+
+function fmtBytes(v) {
+  if (!isNum(v) || v <= 0) return '—';
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + ' GB';
+  if (v >= 1e6) return (v / 1e6).toFixed(0) + ' MB';
+  return (v / 1e3).toFixed(0) + ' KB';
+}
+
+function arr(v, n) {
+  return Array.isArray(v) ? v : new Array(n).fill(0);
+}
+
+/* 某个接口挂了之后，对应面板不能一直挂着「正在加载…」——那和真的在加载分不清。
+ * S.errors 里的条目都带来源前缀，据此把面板文案换成失败提示。 */
+function failed(prefix) { return S.errors.some((e) => e.indexOf(prefix) === 0); }
+
+function panelMsg(prefix, emptyText) {
+  return failed(prefix) ? '接口没取到数据，详见页面顶部的告警。' : emptyText;
+}
+
+async function jget(url) {
+  const r = await fetch(url, { headers: { Accept: 'application/json' } });
+  let d = null;
+  // 5xx 时 Flask 可能返回 HTML 错误页，json() 会抛，不能让它盖掉真正的状态码
+  try { d = await r.json(); } catch (e) { d = null; }
+  if (!r.ok) throw new Error((d && d.error) || `HTTP ${r.status}`);
+  return d || {};
+}
+
+async function jpost(url, body) {
+  const r = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Annotator': who() },
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   });
-  return { ok: r.ok, data: await r.json() };
+  let d = null;
+  try { d = await r.json(); } catch (e) { d = null; }
+  if (!r.ok) throw new Error((d && d.error) || `HTTP ${r.status}`);
+  return d || {};
 }
 
-async function refresh() {
-  if (!who() || !BallGtAoss.loadCred().access_key) {
-    setMsg('请先在上方设置标注员名字与 AOSS 凭证', 'err');
+/* ---------------------------------------------------------------- 图表
+ *
+ * 这台机器可能没外网，图表库一律不引，用 canvas 手画。
+ * 两条纵轴：数量级差几个数量级的序列（GT 帧 vs 包数、池深 vs 速率）叠在一张图上
+ * 时，小的那条会被压成一条贴地的直线，所以按 axis 字段分左右轴各自归一化。
+ */
+
+/* 轴顶取整到 1/2/2.5/5/10 × 10^k。下限压到 4：全零或个位数的计数轴按 4 等分会
+ * 标出 0.8 / 0.3 这种刻度，看板上全是「个」，小数刻度只会让人愣一下。 */
+function niceMax(v) {
+  if (!(v > 0)) return 4;
+  const e = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / e;
+  const m = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+  return Math.max(4, m * e);
+}
+
+function drawChart(canvasId, cfg) {
+  const cv = document.getElementById(canvasId);
+  if (!cv) return;
+  cv._cfg = cfg;
+
+  const dpr = window.devicePixelRatio || 1;
+  const W = cv.clientWidth || 640;
+  const H = cv.clientHeight || 230;
+  cv.width = Math.max(1, Math.round(W * dpr));
+  cv.height = Math.max(1, Math.round(H * dpr));
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = '11px -apple-system,"PingFang SC",sans-serif';
+  ctx.textBaseline = 'middle';
+
+  const vis = cfg.series.filter((s) => !S.hidden.has(s.key));
+  const hasR = vis.some((s) => s.axis === 'right');
+  const pad = { l: 46, r: hasR ? 50 : 14, t: 12, b: 24 };
+  const pw = Math.max(10, W - pad.l - pad.r);
+  const ph = Math.max(10, H - pad.t - pad.b);
+  const xs = cfg.xs || [];
+  const n = xs.length;
+
+  let maxL = 0, maxR = 0;
+  for (const s of vis) {
+    for (const v of (s.data || [])) {
+      if (!isNum(v)) continue;
+      if (s.axis === 'right') { if (v > maxR) maxR = v; } else if (v > maxL) maxL = v;
+    }
+  }
+  maxL = niceMax(maxL);
+  maxR = niceMax(maxR);
+
+  ctx.strokeStyle = '#2c313b';
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const y = Math.round(pad.t + ph * g / 4) + 0.5;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+    ctx.fillStyle = '#8b93a1';
+    ctx.textAlign = 'right';
+    ctx.fillText(fmtNum(maxL * (1 - g / 4)), pad.l - 6, y);
+    if (hasR) {
+      ctx.textAlign = 'left';
+      ctx.fillText(fmtNum(maxR * (1 - g / 4)), pad.l + pw + 6, y);
+    }
+  }
+
+  const X = (i) => (n <= 1 ? pad.l + pw / 2 : pad.l + pw * i / (n - 1));
+  const Y = (v, axis) => {
+    const m = axis === 'right' ? maxR : maxL;
+    const t = m > 0 ? Math.min(1, Math.max(0, v / m)) : 0;
+    return pad.t + ph * (1 - t);
+  };
+  cv._geom = { pad, pw, ph, n, X };
+
+  // x 轴刻度：桶数多的时候只标 5 个，标满会糊成一片
+  if (n) {
+    ctx.fillStyle = '#8b93a1';
+    ctx.textAlign = 'center';
+    const k = Math.min(5, n);
+    for (let j = 0; j < k; j++) {
+      const i = k === 1 ? 0 : Math.round(j * (n - 1) / (k - 1));
+      const ts = xs[i];
+      if (!isNum(ts)) continue;
+      const d = new Date(ts * 1000);
+      const lab = S.hours <= 24
+        ? `${p2(d.getHours())}:${p2(d.getMinutes())}`
+        : `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}h`;
+      ctx.fillText(lab, X(i), H - pad.b / 2);
+    }
+  }
+
+  const blank = !n || !vis.length ||
+    vis.every((s) => (s.data || []).every((v) => !isNum(v) || v === 0));
+  if (blank) {
+    ctx.fillStyle = '#8b93a1';
+    ctx.textAlign = 'center';
+    ctx.fillText(cfg.emptyText || '该时间窗内暂无数据', pad.l + pw / 2, pad.t + ph / 2);
     return;
   }
-  try {
-    const p = await BallGtAoss.poolStatus(who());
-    lastPool = p;
-    $('#pool').innerHTML = [
-      ['可领取', p.available.length], ['我的', p.mine.length],
-      ['他人进行中', p.taken.length], ['已完成', p.done.length], ['总包数', p.n_packets],
-    ].map(([k,v]) => `<div><b>${v}</b><span>${k}</span></div>`).join('');
 
-    let local = {};
-    if (p.mine.length) {
-      const { data } = await jpost('/api/local_status', { packet_ids: p.mine });
-      local = (data && data.local) || {};
-    }
-
-    const rows = p.mine.map(pid => {
-      const L = local[pid] || {};
-      const job = L.job || {};
-      let status, action;
-      if (L.ready) {
-        const n = L.n_labeled||0, t = L.n_targets||0;
-        const pct = t ? Math.round(100*n/t) : 0;
-        status = `<div class="bar"><i style="width:${pct}%"></i></div>
-                  <div style="color:var(--dim);font-size:12px">${n}/${t} 帧（${pct}%）</div>`;
-        action = `<a href="/annotate/${pid}"><button type="button">${n?'继续标注':'开始标注'}</button></a>`
-               + (n>=t && t>0 ? ` <button class="ghost" type="button" onclick="submitPacket('${pid}')">提交</button>` : '');
-      } else if (job.state === 'error') {
-        status = `<span class="err">准备失败：${job.msg||''}</span>`;
-        action = `<button class="ghost" type="button" onclick="reingest('${pid}')">重试</button>`;
-      } else if (job.state || L.has_zip) {
-        const pct = job.total ? Math.round(100*job.done/job.total) : 0;
-        status = `<div class="bar"><i style="width:${pct}%;background:var(--warn)"></i></div>
-                  <div style="color:var(--dim);font-size:12px">${job.msg||'准备中…'} ${job.total?pct+'%':''}</div>`;
-        action = '';
-      } else {
-        status = `<span style="color:var(--dim)">已领取，等待下载…</span>`;
-        action = `<button class="ghost" type="button" onclick="reingest('${pid}')">下载并准备</button>`;
+  for (const s of vis) {
+    const data = s.data || [];
+    if (s.fill) {
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < n; i++) {
+        const v = data[i];
+        if (!isNum(v)) continue;
+        const x = X(i), y = Y(v, s.axis);
+        if (started) ctx.lineTo(x, y); else { ctx.moveTo(x, pad.t + ph); ctx.lineTo(x, y); started = true; }
       }
-      return `<tr><td class="pid">${pid}</td><td style="width:40%">${status}</td>
-              <td style="text-align:right">${action}</td></tr>`;
-    });
-    $('#mine tbody').innerHTML = rows.join('') ||
-      '<tr><td style="color:var(--dim)">还没有任务，点右上「领取新任务」</td></tr>';
-
-    const busy = p.mine.some(pid => {
-      const L = local[pid] || {};
-      return !L.ready && (L.job||{}).state !== 'error';
-    });
-    clearTimeout(timer);
-    timer = setTimeout(refresh, busy ? 1500 : 10000);
-  } catch (e) {
-    setMsg('对象存储访问失败：' + (e.message || e), 'err');
-    clearTimeout(timer);
-    timer = setTimeout(refresh, 8000);
-  }
-}
-
-async function downloadAndIngest(pid) {
-  setMsg(`正在从本站镜像加载 ${pid}…`);
-  const r = await fetch('/api/pull/' + encodeURIComponent(pid), {
-    method: 'POST', headers: { 'X-Annotator': who() },
-  });
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.error || 'pull 失败');
-  setMsg(`${pid} 已开始解码 / 生成增强视图（${(data.bytes/1e6).toFixed(1)} MB）`);
-}
-
-async function claim() {
-  if (!who()) { alert('请先设置标注员名字'); return; }
-  $('#claim').disabled = true;
-  setMsg('正在领取…');
-  try {
-    const st = await BallGtAoss.poolStatus(who());
-    const cand = st.available[0];
-    if (!cand) throw new Error('任务池里暂时没有待标注的包');
-    const ok = await BallGtAoss.claim(cand, who());
-    if (!ok) throw new Error('领取失败（可能被他人抢先），请重试');
-    await downloadAndIngest(cand);
-  } catch (e) {
-    setMsg(e.message || String(e), 'err');
-  }
-  $('#claim').disabled = false;
-  refresh();
-}
-
-async function reingest(pid) {
-  try { await downloadAndIngest(pid); } catch (e) { setMsg(e.message || String(e), 'err'); }
-  refresh();
-}
-
-async function submitPacket(pid) {
-  setMsg('正在组装结果…');
-  try {
-    let { ok, data } = await jpost('/api/build_result/' + pid, { annotator: who() });
-    if (!ok && data.missing && confirm(`${data.error}。仍要提交吗？`)) {
-      ({ ok, data } = await jpost('/api/build_result/' + pid, { annotator: who(), force: true }));
+      if (started) {
+        ctx.lineTo(X(n - 1), pad.t + ph);
+        ctx.closePath();
+        ctx.fillStyle = s.fill;
+        ctx.fill();
+      }
     }
-    if (!ok) throw new Error(data.error || '组装失败');
-    setMsg('正在上传到对象存储…');
-    const key = await BallGtAoss.submitResult(pid, who(), data.result);
-    await jpost('/api/cleanup/' + pid, { key, annotator: who() });
-    setMsg(`已提交 ${pid}（${data.n_labeled} 帧）→ ${key}`);
-  } catch (e) {
-    setMsg(e.message || String(e), 'err');
+    ctx.beginPath();
+    ctx.setLineDash(s.dash || []);
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 1.8;
+    let started = false;
+    for (let i = 0; i < n; i++) {
+      const v = data[i];
+      if (!isNum(v)) { started = false; continue; }
+      const x = X(i), y = Y(v, s.axis);
+      if (started) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      started = true;
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
-  refresh();
+
+  const hi = cv._hi;
+  if (isNum(hi) && hi >= 0 && hi < n) {
+    const x = X(hi);
+    ctx.strokeStyle = 'rgba(148,163,184,.5)';
+    ctx.beginPath();
+    ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + ph);
+    ctx.stroke();
+    for (const s of vis) {
+      const v = (s.data || [])[hi];
+      if (!isNum(v)) continue;
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.arc(x, Y(v, s.axis), 3, 0, 6.283);
+      ctx.fill();
+    }
+  }
 }
 
-window.submitPacket = submitPacket;
-window.reingest = reingest;
+function bindChart(canvasId, tipId) {
+  const cv = document.getElementById(canvasId);
+  const tip = document.getElementById(tipId);
+  if (!cv || cv._bound) return;
+  cv._bound = true;
 
-$('#claim').onclick = claim;
-$('#refresh').onclick = refresh;
-fillCredForm();
-refresh();
+  cv.addEventListener('mousemove', (e) => {
+    const cfg = cv._cfg, g = cv._geom;
+    if (!cfg || !g || !g.n) return;
+    const b = cv.getBoundingClientRect();
+    const px = e.clientX - b.left;
+    const i = g.n <= 1 ? 0 : Math.round((px - g.pad.l) / g.pw * (g.n - 1));
+    const hi = Math.max(0, Math.min(g.n - 1, i));
+    cv._hi = hi;
+    drawChart(canvasId, cfg);
+    const ts = (cfg.xs || [])[hi];
+    const rows = cfg.series
+      .filter((s) => !S.hidden.has(s.key))
+      .map((s) => {
+        const v = (s.data || [])[hi];
+        return `<div><i style="background:${s.color}"></i>${esc(s.name)} <b>${
+          isNum(v) ? fmtNum(v) : '—'}</b></div>`;
+      }).join('');
+    tip.innerHTML = `<div class="dim">${fmtTs(ts)}</div>${rows}`;
+    tip.style.display = 'block';
+    const tw = tip.offsetWidth;
+    tip.style.left = Math.max(0, Math.min(cv.clientWidth - tw, g.X(hi) + 12)) + 'px';
+    tip.style.top = '6px';
+  });
+
+  cv.addEventListener('mouseleave', () => {
+    cv._hi = null;
+    tip.style.display = 'none';
+    if (cv._cfg) drawChart(canvasId, cv._cfg);
+  });
+}
+
+function renderLegend(elId, series) {
+  const el = document.getElementById(elId);
+  el.innerHTML = series.map((s) => {
+    const off = S.hidden.has(s.key) ? ' off' : '';
+    const mark = s.dash
+      ? `<i class="d" style="border-top-color:${s.color}"></i>`
+      : `<i style="background:${s.color}"></i>`;
+    return `<span class="lg${off}" data-series="${esc(s.key)}">${mark}${esc(s.name)}</span>`;
+  }).join('');
+  if (!el._bound) {
+    el._bound = true;
+    el.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-series]');
+      if (!t) return;
+      const k = t.getAttribute('data-series');
+      if (S.hidden.has(k)) S.hidden.delete(k); else S.hidden.add(k);
+      draw();
+    });
+  }
+}
+
+/* ---------------------------------------------------------------- 顶部概览 */
+
+function renderCounts() {
+  const st = S.stats;
+  const c = (st && st.counts) || {};
+  const cells = [
+    ['available', '可领取'], ['leased', '已领取'], ['submitted', '待审'],
+    ['accepted', '已入库'], ['need_human', '待人工修补'], ['archived', '已归档'],
+  ].map(([k, label]) => {
+    const color = (STATE_MAP[k] || {}).color || 'var(--fg)';
+    return `<div><b style="color:${color}">${st ? n0(c[k]) : '—'}</b><span>${label}</span></div>`;
+  });
+  cells.push(`<div><b style="color:var(--vio)">${st ? n0(c.n_pending_review) : '—'}</b>
+              <span>待审提交</span></div>`);
+  cells.push(`<div><b>${st ? n0(st.n_open_leases) : '—'}</b><span>活跃租约</span></div>`);
+  cells.push(`<div><b>${st ? n0(c.n_total) : '—'}</b><span>包总数</span></div>`);
+  $('#counts').innerHTML = cells.join('');
+
+  const g = (st && st.gt) || {};
+  const tot = n0(g.n_frames);
+  const share = (v) => (tot ? ` (${Math.round(n0(v) / tot * 100)}%)` : '');
+  $('#gtStat').innerHTML = [
+    `<div><b style="color:var(--ok)">${st ? tot : '—'}</b><span>已入库 GT 帧</span></div>`,
+    `<div><b>${st ? n0(g.n_visible) : '—'}</b><span>其中可见球</span></div>`,
+    `<div><b>${st ? n0(g.n_packets) : '—'}</b><span>覆盖包数</span></div>`,
+    `<div><b style="color:var(--acc)">${st ? n0(g.n_ai) : '—'}</b>
+       <span>AI 帧</span><em>${st ? share(g.n_ai) || '—' : ''}</em></div>`,
+    `<div><b style="color:var(--warn)">${st ? n0(g.n_human) : '—'}</b>
+       <span>人工帧</span><em>${st ? share(g.n_human) || '—' : ''}</em></div>`,
+    `<div><b style="color:var(--dim)">${st ? n0(g.n_interp) : '—'}</b>
+       <span>插值帧</span><em>${st ? share(g.n_interp) || '—' : ''}</em></div>`,
+  ].join('');
+
+  // 全新库的第一眼：与其让六个 0 看起来像出了故障，不如直说下一步该干什么
+  const fresh = st && !n0(c.n_total) && !tot;
+  $('#coldStart').innerHTML = fresh
+    ? `<div class="empty" style="text-align:left;padding:16px 0 0">
+         库里还没有任何包。先让采集端跑起来（<code>submit.sh</code> 产包并
+         <code>POST /api/v2/register</code> 注册），包出现后本页所有面板会自动填上。</div>`
+    : '';
+}
+
+/* ---------------------------------------------------------------- 吞吐 */
+
+function renderWindowBtns() {
+  const el = $('#winBtns');
+  el.innerHTML = WINDOWS.map((w) =>
+    `<button type="button" class="ghost sm${w.hours === S.hours ? ' on' : ''}"
+      data-hours="${w.hours}">${w.label}</button>`).join('');
+  if (!el._bound) {
+    el._bound = true;
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-hours]');
+      if (!b) return;
+      S.hours = Number(b.getAttribute('data-hours'));
+      renderWindowBtns();
+      refreshAll();
+    });
+  }
+}
+
+function tpSeries() {
+  const t = (S.stats && S.stats.throughput) || {};
+  const n = Math.max(0, n0(t.buckets) || (Array.isArray(t.registered) ? t.registered.length : 0));
+  return [
+    { key: 'tp:registered', name: '注册包', color: C.acc, data: arr(t.registered, n) },
+    { key: 'tp:leased', name: '领包', color: C.vio, data: arr(t.leased, n) },
+    { key: 'tp:submitted_ai', name: 'AI 提交', color: C.ok, data: arr(t.submitted_ai, n) },
+    { key: 'tp:submitted_human', name: '人工提交', color: C.warn, data: arr(t.submitted_human, n) },
+    { key: 'tp:reviewed', name: '审核', color: C.pink, data: arr(t.reviewed, n) },
+    { key: 'tp:gt_frames', name: '入库 GT 帧（右轴）', color: C.cyan, axis: 'right',
+      dash: [4, 3], data: arr(t.gt_frames, n) },
+  ];
+}
+
+function renderThroughput() {
+  const t = (S.stats && S.stats.throughput) || {};
+  const series = tpSeries();
+  const n = series[0].data.length;
+  // 第 i 个桶的时间是桶的中点，接口只给 t0 / step_sec，得自己算
+  const t0 = isNum(t.t0) ? t.t0 : 0;
+  const step = isNum(t.step_sec) ? t.step_sec : 0;
+  const xs = new Array(n).fill(0).map((_, i) => t0 + (i + 0.5) * step);
+  renderLegend('tpLegend', series);
+  drawChart('tpChart', {
+    xs, series,
+    emptyText: S.stats ? '该时间窗内没有任何事件' : panelMsg('统计', '正在加载…'),
+  });
+}
+
+/* ---------------------------------------------------------------- 通过率 */
+
+function rateChip(v) {
+  if (!isNum(v)) return '<span class="dim">—</span>';
+  const color = v >= 0.9 ? 'var(--ok)' : v >= 0.7 ? 'var(--warn)' : 'var(--bad)';
+  const bg = v >= 0.9 ? 'rgba(74,222,128,.13)' : v >= 0.7 ? 'rgba(251,191,36,.13)' : 'rgba(248,113,113,.13)';
+  return `<span class="rate" style="color:${color};background:${bg}">${pct(v)}</span>`;
+}
+
+function renderRate() {
+  const rows = (S.stats && S.stats.review_rate) || [];
+  if (!rows.length) {
+    $('#rateWrap').innerHTML = `<div class="empty">${S.stats
+      ? '还没有 AI 提交，跑完第一批 <code>client/auto.py</code> 后这里才会有数。'
+      : panelMsg('统计', '正在加载…')}</div>`;
+    return;
+  }
+  const body = rows.map((r) => {
+    const judged = n0(r.n_judged);
+    return `<tr>
+      <td class="pid">${esc(r.model_used)}</td>
+      <td class="pid">${esc(r.workflow)}</td>
+      <td>${n0(r.n_sub)}</td>
+      <td>${judged}${n0(r.n_pending) ? ` <span class="tag">待审 ${n0(r.n_pending)}</span>` : ''}</td>
+      <td>${isNum(r.packet_pass_rate) ? pct(r.packet_pass_rate) : '<span class="dim">—</span>'}
+        <div class="hint">整包过 ${n0(r.n_pkt_accepted)} · 部分 ${n0(r.n_pkt_partial)} · 打回 ${n0(r.n_pkt_rejected)}</div></td>
+      <td>${rateChip(r.frame_pass_rate)}
+        <div class="hint">${n0(r.f_ok)} 通过 / ${n0(r.f_bad)} 打回</div></td>
+      <td>${isNum(r.mean_conf) ? r.mean_conf.toFixed(3) : '<span class="dim">—</span>'}</td>
+      <td>${isNum(r.interp_ratio) ? pct(r.interp_ratio) : '<span class="dim">—</span>'}</td>
+    </tr>`;
+  }).join('');
+  $('#rateWrap').innerHTML = `<table style="margin-top:8px"><thead><tr>
+      <th>模型</th><th>工作流</th><th>提交</th><th>已裁决</th>
+      <th>包级通过率</th><th>帧级通过率</th><th>平均置信度</th><th>插值占比</th>
+    </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/* ---------------------------------------------------------------- 采集端 */
+
+function poolOf() {
+  // producers 与 stats 都带 pool，谁新用谁；两个接口都挂了才回退到空对象
+  const a = (S.prod && S.prod.pool) || null;
+  const b = (S.stats && S.stats.pool) || null;
+  if (a && b) return n0(a.ts) >= n0(b.ts) ? a : b;
+  return a || b || {};
+}
+
+function poolSeriesOf() {
+  const a = (S.prod && S.prod.pool_series) || null;
+  if (Array.isArray(a) && a.length) return a;
+  const b = (S.stats && S.stats.pool_series) || null;
+  return Array.isArray(b) ? b : [];
+}
+
+function renderPool() {
+  const ps = poolSeriesOf();
+  const series = [
+    { key: 'pool:n_available', name: '池深（可领取）', color: C.acc,
+      fill: 'rgba(96,165,250,.12)', data: ps.map((p) => (isNum(p.n_available) ? p.n_available : null)) },
+    { key: 'pool:produce', name: '生产速率 个/时（右轴）', color: C.ok, axis: 'right',
+      dash: [5, 3], data: ps.map((p) => (isNum(p.produce_rate_per_h) ? p.produce_rate_per_h : null)) },
+    { key: 'pool:consume', name: '消费速率 个/时（右轴）', color: C.bad, axis: 'right',
+      dash: [2, 3], data: ps.map((p) => (isNum(p.consume_rate_per_h) ? p.consume_rate_per_h : null)) },
+  ];
+  renderLegend('poolLegend', series);
+  drawChart('poolChart', {
+    xs: ps.map((p) => p.ts),
+    series,
+    emptyText: S.stats || S.prod ? '还没有池深采样' : panelMsg('统计', '正在加载…'),
+  });
+
+  const p = poolOf();
+  const loaded = !!(S.stats || S.prod);
+  const keep = n0(p.keep_available);
+  const low = keep > 0 && n0(p.n_available) < keep / 2;
+  const eta = p.eta_empty_min;
+  // eta 为 null 是「不会耗尽 / 在涨」，不是缺数据，必须和「—」区分开；
+  // 但池深已经是 0 时同样给 null，那时候说「不会耗尽」是误导，得说已经空了
+  const empty = loaded && !n0(p.n_available);
+  const etaTxt = !loaded ? '—'
+    : empty ? '已空'
+    : isNum(eta) ? Math.round(eta) + ' 分'
+    : '不会耗尽';
+  const etaColor = !loaded ? 'var(--fg)'
+    : empty ? 'var(--bad)'
+    : isNum(eta) ? (eta < 60 ? 'var(--bad)' : eta < 180 ? 'var(--warn)' : 'var(--fg)')
+    : 'var(--ok)';
+
+  $('#poolKpi').innerHTML = [
+    `<div><b style="color:${low ? 'var(--bad)' : 'var(--acc)'}">${loaded ? n0(p.n_available) : '—'}</b>
+       <span>当前池深</span><em>目标 ${loaded ? n0(p.keep_available) : '—'}</em></div>`,
+    `<div><b style="color:var(--ok)">${loaded ? fmtNum(n0(p.produce_rate_per_h)) : '—'}</b>
+       <span>生产 个/时</span></div>`,
+    `<div><b style="color:var(--bad)">${loaded ? fmtNum(n0(p.consume_rate_per_h)) : '—'}</b>
+       <span>消费 个/时</span></div>`,
+    `<div><b style="color:${etaColor}">${etaTxt}</b><span>耗尽 ETA</span></div>`,
+    `<div><b style="color:${loaded && !n0(p.n_live_producers) ? 'var(--bad)' : 'var(--ok)'}">${
+       loaded ? n0(p.n_live_producers) : '—'}</b><span>存活产包作业</span></div>`,
+    `<div><b>${loaded ? n0(p.want_more_total) : '—'}</b>
+       <span>还需补包</span><em>单批 ${loaded ? n0(p.batch) : '—'}</em></div>`,
+  ].join('');
+
+  $('#poolHint').textContent = loaded && isNum(p.ts) ? '池状态采样于 ' + fmtTs(p.ts) : '';
+}
+
+function renderProducers() {
+  const jobs = (S.prod && S.prod.producers) || [];
+  const el = $('#producers');
+  if (!jobs.length) {
+    el.innerHTML = `<div class="empty">${S.prod
+      ? '还没有登记的产包作业。<code>submit.sh</code> 拿到 <code>pt-*</code> 后会自动 register，几分钟内就会出现在这里。'
+      : panelMsg('采集端', '正在加载…')}</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="jobs">${jobs.map(jobCard).join('')}</div>`;
+}
+
+function jobCard(j) {
+  const h = HEALTH[j.health] || { label: j.health || '未知', color: 'var(--dim)' };
+  const poll = n0(j.poll_sec) || 300;
+  const hb = j.hb_age_sec;
+  // 心跳超过两个轮询周期就该起疑，超过四个基本可以判定挂了
+  const hbColor = !isNum(hb) ? 'var(--dim)'
+    : hb > poll * 4 ? 'var(--bad)' : hb > poll * 2 ? 'var(--warn)' : 'var(--fg)';
+  const acp = j.acp_age_sec;
+  const acpColor = isNum(acp) && acp > poll * 4 ? 'var(--warn)' : 'var(--dim)';
+  const open = S.openJobs.has(j.job_id);
+  const evts = Array.isArray(j.events) ? j.events : [];
+
+  const kv = [
+    ['心跳时延', `<span style="color:${hbColor}">${fmtAge(hb)}</span>
+      <span class="hint">（轮询 ${poll}s，上次 ${fmtTs(j.last_heartbeat)}）</span>`],
+    ['ACP 轮询', `<span style="color:${acpColor}">${fmtAge(acp)}</span>
+      <span class="hint">${esc(j.acp_state || '—')}</span>`],
+    ['已产包', `${dash(j.n_packets)} <span class="hint">（自报 ${dash(j.n_produced)}）</span>
+      · 近 1 小时 <b>${isNum(j.rate_per_h) ? fmtNum(j.rate_per_h) : '—'}</b> 个/时`],
+    ['当前阶段', `${esc(j.stage || '—')} <span class="hint">第 ${dash(j.loop_iter)} 轮</span>`],
+    ['节点 / 池', `${esc(j.node || '—')} <span class="hint">${esc(j.pool || '')}</span>`],
+    ['启动于', `${fmtTs(j.started_at)} <span class="hint">${esc(j.run_stamp || '')}</span>`],
+    ['日志', j.log_path ? `<code>${esc(j.log_path)}</code>` : '<span class="dim">—</span>'],
+  ];
+  if (j.last_error) kv.push(['最后报错', `<span class="err">${esc(j.last_error)}</span>`]);
+
+  const evtRows = evts.slice().reverse().slice(0, 60).map((e) => {
+    const color = EVT_COLOR[e.kind] || 'var(--dim)';
+    return `<div class="evt"><span class="t">${fmtTs(e.ts)}</span>
+      <span style="color:${color}">${esc(e.kind)}</span>
+      <span class="m">${esc(e.msg)}</span></div>`;
+  }).join('');
+
+  return `<div class="job">
+    <div class="jh">
+      <div class="row" style="gap:8px">
+        <span class="dot" style="background:${h.color}"></span>
+        <b class="pid">${esc(j.job_id)}</b>
+        <span class="tag" style="border-color:${h.color};color:${h.color}">${esc(h.label)}</span>
+      </div>
+      <button type="button" class="ghost sm" data-toggle="${esc(j.job_id)}">${
+        open ? '收起事件' : `事件 ${evts.length}`}</button>
+    </div>
+    <div class="hint" style="margin-top:2px">${esc(j.display_name || '')}</div>
+    <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
+    <div class="evts" style="display:${open ? 'block' : 'none'}">${
+      evtRows || '<div class="dim">该时间窗内没有事件</div>'}</div>
+  </div>`;
+}
+
+/* ---------------------------------------------------------------- 告警 */
+
+function renderBanner() {
+  const out = [];
+
+  for (const e of S.errors) {
+    out.push(`<div class="alert bad"><b>接口异常</b><span>${esc(e)}</span></div>`);
+  }
+
+  const p = poolOf();
+  const jobs = (S.prod && S.prod.producers) || [];
+  const ps = poolSeriesOf();
+  const keep = n0(p.keep_available);
+  const live = n0(p.n_live_producers);
+
+  if (keep > 0 && n0(p.n_available) < keep / 2) {
+    out.push(`<div class="alert warn"><b>池深过低</b><span>可领取 ${n0(p.n_available)} 个，
+      不到目标 ${keep} 的一半。标注端很快会领不到包。</span></div>`);
+  }
+  if (isNum(p.eta_empty_min) && p.eta_empty_min < 60) {
+    out.push(`<div class="alert bad"><b>池子即将耗尽</b><span>按当前生产 / 消费速率约
+      ${Math.round(p.eta_empty_min)} 分钟后清空。</span></div>`);
+  }
+
+  const sick = jobs.filter((j) => ['failed', 'gone', 'stale'].includes(j.health));
+  if (sick.length) {
+    out.push(`<div class="alert bad"><b>产包作业异常</b><span>${sick.map((j) =>
+      `${esc(j.job_id)}（${esc((HEALTH[j.health] || {}).label || j.health)}${
+        j.last_error ? '：' + esc(j.last_error) : ''}）`).join('；')}</span></div>`);
+  }
+
+  // 「池子在掉」取整个窗口的首尾差，只看瞬时速率会被单次领包抖动带偏
+  const first = ps.find((x) => isNum(x.n_available));
+  const last = ps.slice().reverse().find((x) => isNum(x.n_available));
+  const falling = first && last && last.n_available < first.n_available;
+  if ((S.stats || S.prod) && live === 0 && (falling || n0(p.consume_rate_per_h) > n0(p.produce_rate_per_h))) {
+    out.push(`<div class="alert bad"><b>采集端可能已停</b><span>池深在下降，但没有任何存活的
+      <code>pt-*</code> 作业在产包。检查 ACP 上的常驻作业是否被回收。</span></div>`);
+  }
+
+  $('#banner').innerHTML = out.join('');
+}
+
+/* ---------------------------------------------------------------- 包列表 */
+
+function renderStateBtns() {
+  const counts = (S.packets && S.packets.counts) || (S.stats && S.stats.counts) || {};
+  const total = S.packets ? n0(S.packets.total) : null;
+  const el = $('#stateBtns');
+  el.innerHTML = STATES.map(([k, label]) => {
+    const n = k === 'all' ? n0(counts.n_total) : n0(counts[k]);
+    return `<button type="button" class="ghost sm${k === S.pkState ? ' on' : ''}"
+      data-state="${k}">${label} <span class="dim">${n}</span></button>`;
+  }).join('');
+  if (!el._bound) {
+    el._bound = true;
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-state]');
+      if (!b) return;
+      S.pkState = b.getAttribute('data-state');
+      S.pkOffset = 0;
+      if (S.pkState !== 'need_human') S.pkSelected.clear();
+      renderStateBtns();
+      refreshPackets();
+    });
+  }
+  $('#pkHint').textContent = total === null ? ''
+    : S.pkQ ? `匹配 ${total} 个包` : `共 ${total} 个包`;
+}
+
+function pkRow(p) {
+  const st = STATE_MAP[p.state] || { label: p.state || '未知', color: 'var(--dim)' };
+  const cov = p.coverage;
+  const covCell = isNum(cov)
+    ? `<div class="bar"><i style="width:${Math.min(100, Math.round(cov * 100))}%;background:${
+        cov >= 0.99 ? 'var(--ok)' : 'var(--warn)'}"></i></div>
+       <div class="hint">${n0(p.n_labeled)}/${n0(p.n_targets)}（${pct(cov, 0)}）</div>`
+    : `<span class="dim">未提交</span>`;
+  const gtCov = p.gt_coverage;
+  const gtCell = isNum(gtCov)
+    ? `<div class="bar"><i style="width:${Math.min(100, Math.round(gtCov * 100))}%"></i></div>
+       <div class="hint">${n0(p.n_gt)}/${n0(p.n_targets)}（${pct(gtCov, 0)}）</div>`
+    : `<span class="dim">—</span>`;
+
+  const src = p.source
+    ? `<span class="tag" style="border-color:${p.source === 'ai' ? 'var(--acc)' : 'var(--warn)'};
+        color:${p.source === 'ai' ? 'var(--acc)' : 'var(--warn)'}">${p.source === 'ai' ? 'AI' : '人工'}</span>`
+    : '<span class="dim">—</span>';
+  const by = p.source === 'ai' ? (p.model_used || p.worker) : p.worker;
+
+  const flags = Array.isArray(p.qc_flags) ? p.qc_flags : [];
+  const qc = flags.length
+    ? flags.map((f) => `<span class="tag qc">${esc(f)}</span>`).join(' ')
+    : '<span class="dim">—</span>';
+
+  const need = Array.isArray(p.need_frames) ? p.need_frames.length : null;
+  const acts = [];
+  if (p.state === 'need_human' && need !== null) {
+    acts.push(`<span class="err">待修 ${need} 帧</span>`);
+  }
+  if (isNum(p.submission_id)) {
+    const label = p.sub_state === 'pending' ? '去审核' : '再审核';
+    acts.push(`<a href="/review/${p.submission_id}">${label}</a>`);
+  }
+
+  const canSel = p.state === 'need_human';
+  const on = canSel && S.pkSelected.has(p.packet_id);
+  const chk = canSel
+    ? `<td class="chk"><input type="checkbox" data-pid="${esc(p.packet_id)}"${on ? ' checked' : ''}></td>`
+    : (S.pkState === 'need_human' ? '<td class="chk"></td>' : '');
+
+  return `<tr class="${on ? 'sel' : ''}" data-pid="${esc(p.packet_id)}">
+    ${chk}
+    <td class="pid">${esc(p.packet_id)}
+      <div class="hint">${esc(p.sampling || '')} · ${fmtBytes(p.size_bytes)}</div></td>
+    <td><span class="tag" style="border-color:${st.color};color:${st.color}">${esc(st.label)}</span></td>
+    <td>${src}</td>
+    <td class="pid">${by ? esc(by) : '<span class="dim">—</span>'}
+      ${p.workflow ? `<div class="hint">${esc(p.workflow)}</div>` : ''}</td>
+    <td style="min-width:130px">${covCell}</td>
+    <td style="min-width:130px">${gtCell}</td>
+    <td>${isNum(p.mean_conf) ? p.mean_conf.toFixed(2) : '<span class="dim">—</span>'}</td>
+    <td>${isNum(p.n_interp) ? p.n_interp : '<span class="dim">—</span>'}</td>
+    <td>${qc}</td>
+    <td class="pid">${p.producer_job_id ? esc(p.producer_job_id) : '<span class="dim">—</span>'}
+      ${p.producer_node ? `<div class="hint">${esc(p.producer_node)}</div>` : ''}</td>
+    <td class="hint">产 ${fmtTs(p.produced_at)}<br>标 ${fmtTs(p.labeled_at)}<br>审 ${fmtTs(p.reviewed_at)}</td>
+    <td>${acts.join(' ') || ''}</td>
+  </tr>`;
+}
+
+function renderPackets() {
+  renderStateBtns();
+  const d = S.packets;
+  const rows = (d && d.packets) || [];
+  const bulk = $('#pkBulk');
+  if (bulk) bulk.style.display = S.pkState === 'need_human' ? 'flex' : 'none';
+  if (S.pkState !== 'need_human') S.pkSelected.clear();
+  else {
+    const keep = new Set(rows.map((p) => p.packet_id));
+    [...S.pkSelected].forEach((id) => { if (!keep.has(id)) S.pkSelected.delete(id); });
+  }
+
+  if (!rows.length) {
+    let msg = panelMsg('包列表', '正在加载…');
+    if (d) {
+      msg = S.pkQ ? `没有 packet_id 含「${esc(S.pkQ)}」的包`
+        : S.pkState !== 'all' ? '这个状态下暂时没有包'
+        : '库里还没有任何包';
+    }
+    $('#pkWrap').innerHTML = `<div class="empty">${msg}</div>`;
+    $('#pager').innerHTML = '';
+    syncPkSel();
+    return;
+  }
+  const chkHead = S.pkState === 'need_human'
+    ? '<th class="chk"><input type="checkbox" id="pkChkAll" title="全选本页"></th>' : '';
+  $('#pkWrap').innerHTML = `<div style="overflow-x:auto"><table class="pktable"><thead><tr>
+      ${chkHead}
+      <th>packet_id</th><th>状态</th><th>来源</th><th>标注员 / 模型</th>
+      <th>覆盖率</th><th>GT 覆盖率</th><th>置信度</th><th>插值</th>
+      <th>QC</th><th>产出作业</th><th>生产 / 标注 / 审核</th><th></th>
+    </tr></thead><tbody>${rows.map(pkRow).join('')}</tbody></table></div>`;
+
+  const total = n0(d.total);
+  const from = S.pkOffset + 1;
+  const to = S.pkOffset + rows.length;
+  $('#pager').innerHTML = `
+    <span class="hint">第 ${from}–${to} / ${total}</span>
+    <button type="button" class="ghost sm" data-page="prev" ${S.pkOffset <= 0 ? 'disabled' : ''}>上一页</button>
+    <button type="button" class="ghost sm" data-page="next" ${to >= total ? 'disabled' : ''}>下一页</button>
+    ${PK_LIMIT_OPTS.map((n) => `<button type="button" class="ghost sm${
+      n === S.pkLimit ? ' on' : ''}" data-limit="${n}">${n}/页</button>`).join('')}`;
+  syncPkSel();
+}
+
+function syncPkSel() {
+  const n = S.pkSelected.size;
+  const btn = $('#pkRequeue');
+  if (btn) {
+    btn.disabled = !n;
+    btn.textContent = n ? `打回待标注（${n}）` : '打回待标注';
+  }
+  const hint = $('#pkSelHint');
+  if (hint) hint.textContent = n
+    ? `已选 ${n} 个，打回后进可领取（待标注）池`
+    : '勾选待修复包，可一次打回待标注池';
+  const allBtn = $('#pkSelAll');
+  const rows = ((S.packets && S.packets.packets) || []).filter((p) => p.state === 'need_human');
+  if (allBtn) {
+    const allOn = rows.length && rows.every((p) => S.pkSelected.has(p.packet_id));
+    allBtn.textContent = allOn ? '取消全选' : '全选本页';
+    allBtn.disabled = !rows.length;
+  }
+  const chkAll = $('#pkChkAll');
+  if (chkAll) chkAll.checked = rows.length && rows.every((p) => S.pkSelected.has(p.packet_id));
+}
+
+function togglePkSel(pid, on) {
+  if (!pid) return;
+  if (on == null) on = !S.pkSelected.has(pid);
+  if (on) S.pkSelected.add(pid);
+  else S.pkSelected.delete(pid);
+  const tr = document.querySelector(`#pkWrap tr[data-pid="${CSS.escape(pid)}"]`);
+  if (tr) {
+    tr.classList.toggle('sel', S.pkSelected.has(pid));
+    const cb = tr.querySelector('input[type=checkbox]');
+    if (cb) cb.checked = S.pkSelected.has(pid);
+  }
+  syncPkSel();
+}
+
+function togglePkSelAll() {
+  const rows = ((S.packets && S.packets.packets) || []).filter((p) => p.state === 'need_human');
+  const allOn = rows.length && rows.every((p) => S.pkSelected.has(p.packet_id));
+  S.pkSelected.clear();
+  if (!allOn) rows.forEach((p) => S.pkSelected.add(p.packet_id));
+  renderPackets();
+}
+
+async function requeueSelectedPk() {
+  const ids = [...S.pkSelected];
+  if (!ids.length) return;
+  if (!confirm(`把 ${ids.length} 个包从待修复打回待标注？\n之后按整包重标，不再只修打回帧。`)) return;
+  try {
+    const d = await jpost('/api/v2/requeue', { packet_ids: ids, reason: 'requeue_label' });
+    const n = (d.moved || []).length;
+    const skip = (d.skipped || []).length;
+    S.pkSelected.clear();
+    $('#pkSelHint').textContent = skip
+      ? `已打回 ${n} 个，跳过 ${skip} 个` : `已打回待标注 ${n} 个`;
+    await refreshAll();
+  } catch (e) {
+    $('#pkSelHint').textContent = e.message || String(e);
+  }
+}
+
+/* ---------------------------------------------------------------- 刷新 */
+
+function draw() {
+  renderBanner();
+  renderCounts();
+  renderThroughput();
+  renderRate();
+  renderPool();
+  renderProducers();
+  renderPackets();
+}
+
+function packetsURL() {
+  const q = new URLSearchParams({
+    state: S.pkState,
+    limit: String(S.pkLimit),
+    offset: String(S.pkOffset),
+  });
+  if (S.pkQ) q.set('q', S.pkQ);
+  return '/api/v2/packets?' + q.toString();
+}
+
+async function refreshPackets() {
+  try {
+    S.packets = await jget(packetsURL());
+    S.errors = S.errors.filter((e) => !e.startsWith('包列表'));
+  } catch (e) {
+    S.errors = S.errors.filter((x) => !x.startsWith('包列表'));
+    S.errors.push('包列表：' + (e.message || e));
+  }
+  renderBanner();
+  renderPackets();
+}
+
+async function refreshAll() {
+  if (S.busy) return;
+  S.busy = true;
+  $('#refresh').disabled = true;
+  clearTimeout(S.timer);
+
+  const win = WINDOWS.find((w) => w.hours === S.hours) || WINDOWS[1];
+  const errs = [];
+  // allSettled：采集端接口挂了不该把整个看板一起打空
+  const [a, b, c] = await Promise.allSettled([
+    jget(`/api/v2/stats?hours=${win.hours}&buckets=${win.buckets}`),
+    jget(`/api/v2/producers?hours=${win.hours}`),
+    jget(packetsURL()),
+  ]);
+  if (a.status === 'fulfilled') S.stats = a.value; else errs.push('统计：' + (a.reason.message || a.reason));
+  if (b.status === 'fulfilled') S.prod = b.value; else errs.push('采集端：' + (b.reason.message || b.reason));
+  if (c.status === 'fulfilled') S.packets = c.value; else errs.push('包列表：' + (c.reason.message || c.reason));
+  S.errors = errs;
+
+  S.lastAt = new Date();
+  $('#lastAt').textContent = '上次刷新 ' +
+    `${p2(S.lastAt.getHours())}:${p2(S.lastAt.getMinutes())}:${p2(S.lastAt.getSeconds())}` +
+    (errs.length ? '（有接口失败）' : '');
+  draw();
+
+  S.busy = false;
+  $('#refresh').disabled = false;
+  schedule();
+}
+
+/* 页面隐藏时不排下一次刷新——看板经常被开着放一整天，没必要白烧服务器。
+ * 切回来时立刻补一次，避免看到的是几小时前的数。 */
+function schedule() {
+  clearTimeout(S.timer);
+  if (document.hidden) return;
+  S.timer = setTimeout(refreshAll, REFRESH_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) clearTimeout(S.timer);
+  else refreshAll();
+});
+
+/* ---------------------------------------------------------------- 启动 */
+
+$('#refresh').onclick = refreshAll;
+$('#pkSelAll').onclick = togglePkSelAll;
+$('#pkRequeue').onclick = requeueSelectedPk;
+$('#pkWrap').addEventListener('click', (e) => {
+  const cb = e.target.closest('input[type=checkbox]');
+  if (cb && cb.id === 'pkChkAll') {
+    e.stopPropagation();
+    togglePkSelAll();
+    return;
+  }
+  if (cb && cb.dataset.pid) {
+    e.stopPropagation();
+    togglePkSel(cb.dataset.pid, cb.checked);
+  }
+});
+
+$('#producers').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-toggle]');
+  if (!b) return;
+  const id = b.getAttribute('data-toggle');
+  if (S.openJobs.has(id)) S.openJobs.delete(id); else S.openJobs.add(id);
+  renderProducers();
+});
+
+$('#pager').addEventListener('click', (e) => {
+  const pg = e.target.closest('[data-page]');
+  if (pg) {
+    S.pkOffset = Math.max(0, S.pkOffset + (pg.getAttribute('data-page') === 'next' ? S.pkLimit : -S.pkLimit));
+    refreshPackets();
+    return;
+  }
+  const lm = e.target.closest('[data-limit]');
+  if (lm) {
+    S.pkLimit = Number(lm.getAttribute('data-limit'));
+    S.pkOffset = 0;
+    refreshPackets();
+  }
+});
+
+let qTimer = null;
+$('#q').addEventListener('input', (e) => {
+  clearTimeout(qTimer);
+  const v = e.target.value.trim();
+  qTimer = setTimeout(() => {
+    S.pkQ = v;
+    S.pkOffset = 0;
+    refreshPackets();
+  }, 300);
+});
+
+let rzTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(rzTimer);
+  rzTimer = setTimeout(() => {
+    // canvas 宽度由 CSS 决定，窗口一变就得按新宽度重画，否则会被拉伸糊掉
+    if ($('#tpChart')._cfg) drawChart('tpChart', $('#tpChart')._cfg);
+    if ($('#poolChart')._cfg) drawChart('poolChart', $('#poolChart')._cfg);
+  }, 150);
+});
+
+bindChart('tpChart', 'tpTip');
+bindChart('poolChart', 'poolTip');
+renderWindowBtns();
+draw();
+refreshAll();
 </script>
 </body>
 </html>

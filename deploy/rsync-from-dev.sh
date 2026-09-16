@@ -11,6 +11,8 @@ rsync -az --delete \
   --exclude .git \
   --exclude .packet_cache \
   --exclude credentials.json \
+  --exclude .env \
+  --exclude .ball_gt_token \
   --exclude collected \
   --exclude logs \
   "$ROOT/" "$HOST:$DEST"

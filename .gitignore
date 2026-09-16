@@ -21,6 +21,12 @@ credentials.json
 producer/.env
 *.pem
 aoss.conf
+.ball_gt_token
+
+# Packaged agent snapshots
+dist/*.tar.gz
+dist/*.zip
+dist/*.sha256
 
 # Editor / OS
 .DS_Store

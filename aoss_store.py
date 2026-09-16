@@ -3,8 +3,9 @@
 
 对象存储上的布局（桶 `wangmin`，前缀 `ball_det/`）：
 
-    packets/<packet_id>.zip          待标注包（生产端写）
-    packets/<packet_id>.meta.json    轻量索引：列任务时不必下载整个 zip
+    packets/<packet_id>/…            新格式：meta.json + clip.mp4 + dog.mp4 + scan + thumb/
+    packets/<packet_id>.zip          旧 zip（迁移期仍认）
+    packets/<packet_id>.meta.json    轻量索引：列任务时不必下载整包
     claims/<packet_id>/<who>.json    领取标记
     results/<packet_id>__<who>.json  标注结果
     produced.jsonl                   生产端已产出记录（去重用，只追加）
@@ -198,18 +199,30 @@ class Store:
     # ---------- 任务池 ----------
 
     def list_packets(self) -> Dict[str, dict]:
-        """列出所有包的轻量索引：{packet_id: meta 摘要}。"""
+        """列出所有包的轻量索引：{packet_id: meta 摘要}。新前缀与旧 zip 都认。"""
         out: Dict[str, dict] = {}
+        base = self._key("packets") + "/"
         for o in self._list("packets/"):
-            name = o["Key"].rsplit("/", 1)[-1]
-            if not name.endswith(".zip"):
-                continue
-            pid = name[: -len(".zip")]
-            out[pid] = {"packet_id": pid, "size": o["Size"], "last_modified": str(o["LastModified"])}
+            rel = o["Key"][len(base):] if o["Key"].startswith(base) else o["Key"].rsplit("/", 1)[-1]
+            if rel.endswith(".zip") and "/" not in rel:
+                pid = rel[: -len(".zip")]
+                out.setdefault(pid, {"packet_id": pid, "size": o["Size"],
+                                     "last_modified": str(o["LastModified"]), "kind": "zip"})
+            elif rel.endswith("/meta.json"):
+                pid = rel[: -len("/meta.json")]
+                if "/" not in pid:
+                    rec = out.setdefault(pid, {"packet_id": pid, "size": 0,
+                                               "last_modified": str(o["LastModified"]), "kind": "dir"})
+                    rec["kind"] = "dir"
+                    rec["size"] = rec.get("size") or o["Size"]
+            elif rel.endswith(".meta.json") and "/" not in rel:
+                pid = rel[: -len(".meta.json")]
+                out.setdefault(pid, {"packet_id": pid, "size": o["Size"],
+                                     "last_modified": str(o["LastModified"]), "kind": "meta"})
         return out
 
     def packet_index(self, packet_id: str) -> Optional[dict]:
-        return self.get_json(f"packets/{packet_id}.meta.json")
+        return self.get_json(f"packets/{packet_id}/meta.json") or self.get_json(f"packets/{packet_id}.meta.json")
 
     def list_claims(self) -> Dict[str, List[dict]]:
         out: Dict[str, List[dict]] = {}

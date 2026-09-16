@@ -1,8 +1,15 @@
-# 标注服务
+# 服务端（公网）：只做调度 / 审核 / 看板，不解码、不碰对象存储
 flask>=3.0
-opencv-python-headless>=4.8
-numpy>=1.24
 waitress>=3.0
 
-# 产包 / 回收 / 同步（S3 兼容 AOSS）
+# 客户端（内网）：解码 + DoG + 审核包拼图
+opencv-python-headless>=4.8
+numpy>=1.24
+pillow>=10.0
+
+# 产包 / 迁移导入（S3 兼容 AOSS）。服务端进程不装也能跑
 boto3>=1.34
+
+# AI 标注客户端（client/）：视觉模型工作流
+openai>=1.40      # 三家供应商都走 OpenAI 兼容 /chat/completions
+pyyaml>=6.0       # 工作流与供应商配置

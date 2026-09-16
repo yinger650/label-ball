@@ -42,7 +42,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from aoss_store import Store, load_credentials  # noqa: E402
-from packet import PacketMeta, make_packet_id, parse_packet_id, write_packet  # noqa: E402
+from packet import (  # noqa: E402
+    CLIP_FPS,
+    PacketMeta,
+    choose_decim,
+    make_packet_id,
+    packet_prefix,
+    parse_packet_id,
+)
+from producer.derive import decimate_clip, derive_from_clip  # noqa: E402
+from producer.server_api import ServerAPI, resolve_job_id, resolve_node  # noqa: E402
 
 
 DATA_ROOT = Path(os.environ.get("BALL_GT_DATA_ROOT", "/mnt/afs/wangmin/data"))
@@ -135,7 +144,7 @@ def discover_videos(data_root: Path) -> List[dict]:
     out: List[dict] = []
     for group_dir in sorted(p for p in data_root.iterdir() if p.is_dir()):
         group = group_dir.name
-        if group.startswith("_") or group.startswith("."):
+        if group.startswith("_") or group.startswith(".") or group.startswith("test_"):
             continue
         if is_archived(group_dir):
             continue
@@ -309,6 +318,118 @@ def extract_clip(
     return int(round(float(st["start_time"]) * fps))
 
 
+# ---------------------------------------------------------------- 服务端挂钩
+
+
+class Reporter:
+    """作业内心跳 + 产出上报。服务端关掉或不可达时全部变成 no-op。"""
+
+    def __init__(self, api: ServerAPI, job_id: str, args) -> None:
+        self.api = api
+        self.job_id = job_id
+        self.node = resolve_node()
+        self.poll_sec = int(args.poll_sec)
+        self.keep_available = int(args.keep_available)
+        self.batch = int(args.batch)
+        self.loop_iter = 0
+        self.stage = "读池"
+        self.n_produced = 0
+        self.n_round = 0
+        self.last_error = ""
+        self._flush_error = False
+        self._offline_warned = False
+
+    def set_stage(self, stage: str, heartbeat: bool = True) -> None:
+        self.stage = stage
+        if heartbeat:
+            self.heartbeat()
+
+    def note_error(self, msg: str) -> None:
+        self.last_error = str(msg)
+        self._flush_error = True
+        self.api.event(self.job_id, "error", str(msg))
+
+    def heartbeat(self) -> Optional[dict]:
+        err = self.last_error if self._flush_error else None
+        self._flush_error = False
+        return self.api.heartbeat(
+            self.job_id,
+            loop_iter=self.loop_iter,
+            stage=self.stage,
+            n_produced=self.n_produced,
+            last_error=err,
+            keep_available=self.keep_available,
+            batch=self.batch,
+            poll_sec=self.poll_sec,
+            node=self.node,
+        )
+
+    def produced(self, pid: str, meta: PacketMeta, size_bytes: int, sampling: str,
+                 thumb_dir: Optional[Path] = None) -> None:
+        self.n_produced += 1
+        self.n_round += 1
+        payload = {
+            "packet_id": pid,
+            "aoss_key": packet_prefix(pid),
+            "meta": json.loads(meta.to_json()),
+            "n_targets": len(meta.targets),
+            "size_bytes": size_bytes,
+            "producer_job_id": self.job_id,
+            "producer_node": self.node,
+        }
+        r = self.api.register_packet(payload, thumb_dir=thumb_dir)
+        if r is None and self.api.enabled:
+            print(f"[warn] 注册包失败 {pid}：{self.api.last_error}", flush=True)
+        ev = self.api.event(
+            self.job_id,
+            "produced",
+            pid,
+            extra={"sampling": sampling, "size_bytes": size_bytes, "n_targets": len(meta.targets)},
+        )
+        if ev is None and self.api.enabled:
+            print(f"[warn] 上报 produced 失败 {pid}：{self.api.last_error}", flush=True)
+
+
+def decide_need(reporter: Reporter, args) -> int:
+    """本轮该补几个。优先心跳里的 want_more，其次 GET /pool，都拿不到就退回固定目标。"""
+    hb = reporter.heartbeat()
+    if hb is not None and hb.get("want_more") is not None:
+        need = max(0, int(hb["want_more"]))
+        pool = hb.get("pool") or {}
+        avail = pool.get("n_available")
+        extra = f"，available={avail}" if avail is not None else ""
+        print(f"[loop] 服务端 want_more={need}{extra}，目标 {args.keep_available}", flush=True)
+        return need
+    # 心跳已经超时/连不上就别再打 /pool，少等一个 timeout
+    pool = None
+    if hb is not None or not reporter.api.enabled:
+        pool = reporter.api.pool(keep_available=args.keep_available, batch=args.batch)
+    if pool is not None and pool.get("want_more") is not None:
+        need = max(0, int(pool["want_more"]))
+        print(
+            f"[loop] GET /pool want_more={need}，available={pool.get('n_available')}，"
+            f"目标 {args.keep_available}",
+            flush=True,
+        )
+        return need
+    need = min(int(args.keep_available), int(args.batch))
+    if not reporter.api.enabled:
+        if not reporter._offline_warned:
+            print(
+                f"[warn] 未配置 BALL_GT_SERVER，退回按 --keep-available={args.keep_available} "
+                f"生产（本轮最多 {need} 个，离线）",
+                flush=True,
+            )
+            reporter._offline_warned = True
+    else:
+        print(
+            f"[warn] 服务端不可达（{reporter.api.last_error}），"
+            f"退回按 --keep-available={args.keep_available} 生产（本轮最多 {need} 个）",
+            flush=True,
+        )
+    return need
+
+
 # ---------------------------------------------------------------- 主流程
 
 
@@ -339,38 +460,45 @@ def run(args) -> None:
     store = Store(cred)
     print(f"[store] {json.dumps(cred.redacted, ensure_ascii=False)}", flush=True)
 
+    api = ServerAPI(timeout=float(getattr(args, "server_timeout", 15.0)))
+    job_id = resolve_job_id()
+    reporter = Reporter(api, job_id, args)
+    print(
+        f"[producer] job_id={job_id} node={reporter.node} "
+        f"server={'off' if not api.enabled else api.base}",
+        flush=True,
+    )
+
     if not args.loop:
-        produce(args, store, args.n_packets)
+        produce(args, store, args.n_packets, reporter)
         return
 
-    # 持续模式：维持一个「待领取」缓冲池，标注员消耗多少就补多少。
-    # 不无脑预产几百个包——单包 15–35 MB，产满几百个就是几十 GB 的对象存储，
-    # 而标注速度是几十分钟一个包，缓冲池够用就行。
+    # 持续模式：问服务端还缺几个（心跳带回 want_more），标注员消耗多少就补多少。
+    # 不再数 AOSS 上的 available——那边不再写 claims/，那个数会永远等于全部已产包。
     t0 = time.time()
     while True:
         if args.max_hours and (time.time() - t0) / 3600.0 > args.max_hours:
             print("[stop] 达到时间上限", flush=True)
             return
+        reporter.loop_iter += 1
+        reporter.n_round = 0
+        reporter.set_stage("读池", heartbeat=False)
         try:
-            st = store.pool_status("__producer__")
-            avail = len(st["available"])
+            need = decide_need(reporter, args)
         except Exception as e:  # noqa: BLE001
-            print(f"[warn] 读取任务池失败：{e}，{args.poll_sec}s 后重试", flush=True)
+            reporter.note_error(str(e))
+            print(f"[warn] 询问补池失败：{e}，{args.poll_sec}s 后重试", flush=True)
             time.sleep(args.poll_sec)
             continue
-        need = args.keep_available - avail
-        print(
-            f"[loop] 待领取 {avail} / 目标 {args.keep_available}"
-            + (f"，本轮补 {need} 个" if need > 0 else "，缓冲池已满，休息"),
-            flush=True,
-        )
         if need > 0:
-            produce(args, store, min(need, args.batch))
+            print(f"[loop] 本轮补 {need} 个", flush=True)
+            produce(args, store, min(need, args.batch), reporter)
         else:
+            print("[loop] 缓冲池已满，休息", flush=True)
             time.sleep(args.poll_sec)
 
 
-def produce(args, store: Store, n_want: int) -> int:
+def produce(args, store: Store, n_want: int, reporter: Optional[Reporter] = None) -> int:
     """产出至多 n_want 个包，返回实际产出数。"""
     rng = random.Random(args.seed)
     videos = discover_videos(Path(args.data_root))
@@ -391,6 +519,8 @@ def produce(args, store: Store, n_want: int) -> int:
             print("[stop] 连续多次找不到可用窗口，可能是池子已铺满", flush=True)
             break
 
+        if reporter:
+            reporter.set_stage("抽窗")
         videos.sort(key=lambda v: (len(used.get(f"{v['group']}__{v['stem']}", [])), rng.random()))
         pool = videos[: max(1, len(videos) // 3)]
         v = rng.choice(pool)
@@ -400,6 +530,8 @@ def produce(args, store: Store, n_want: int) -> int:
             fps, dur = probe(v["mp4"])
         except Exception as e:
             print(f"[skip] {key} ffprobe 失败: {e}", flush=True)
+            if reporter:
+                reporter.note_error(f"ffprobe {key}: {e}")
             videos.remove(v)
             continue
 
@@ -419,34 +551,79 @@ def produce(args, store: Store, n_want: int) -> int:
         roi = compute_roi_wrapped(
             ann, pano_w, pano_h, args.margin_x, args.margin_top, args.margin_bottom
         )
-        n_frames = int(round(args.clip_sec * fps))
+        n_src = int(round(args.clip_sec * fps))
+        decim = choose_decim(fps)
         pid = make_packet_id(v["group"], v["stem"], start_sec, end_sec)
+        prefix = packet_prefix(pid)
 
-        if store.exists(f"packets/{pid}.zip"):
+        if store.exists(f"{prefix}meta.json") or store.exists(f"packets/{pid}.zip"):
             used.setdefault(key, []).append((start_sec, end_sec))
             continue
 
-        print(f"[make] {pid}  ({how}, {v['mp4'].name}, roi={roi})", flush=True)
-        clip = tmpdir / f"{pid}.mp4"
+        print(f"[make] {pid}  ({how}, {v['mp4'].name}, roi={roi}, decim={decim})", flush=True)
+        work = tmpdir / pid
+        work.mkdir(exist_ok=True)
+        raw_clip = work / "clip_src.mp4"
+        clip = work / "clip.mp4"
         t0 = time.time()
+        if reporter:
+            reporter.set_stage("ffmpeg 切片")
         try:
             frame_start = extract_clip(
-                v["mp4"], start_sec, n_frames, roi, clip, args.crf, fps, pano_w
+                v["mp4"], start_sec, n_src, roi, raw_clip, args.crf, fps, pano_w
             )
         except subprocess.CalledProcessError as e:
             print(f"[fail] 切片失败 {pid}: {e}", flush=True)
+            if reporter:
+                reporter.note_error(f"切片失败 {pid}: {e}")
             fails += 1
             continue
 
         expect = int(round(start_sec * fps))
         if abs(frame_start - expect) > 1:
             print(f"[fail] 帧对齐异常：请求 {expect} 实得 {frame_start}，丢弃该包", flush=True)
-            clip.unlink(missing_ok=True)
             fails += 1
             continue
 
-        frame_end = frame_start + n_frames - 1
-        targets = list(range(frame_start, frame_end + 1, args.step))
+        if decim > 1:
+            if reporter:
+                reporter.set_stage("抽帧")
+            try:
+                decimate_clip(raw_clip, clip, decim)
+            except subprocess.CalledProcessError as e:
+                print(f"[fail] 抽帧失败 {pid}: {e}", flush=True)
+                if reporter:
+                    reporter.note_error(f"抽帧失败 {pid}: {e}")
+                fails += 1
+                continue
+            raw_clip.unlink(missing_ok=True)
+        else:
+            raw_clip.replace(clip)
+
+        clip_frames = n_src if decim == 1 else (n_src + decim - 1) // decim
+        frame_end = frame_start + n_src - 1
+        targets = list(range(frame_start, frame_end + 1, decim * args.step))
+
+        if reporter:
+            reporter.set_stage("DoG / scan")
+        try:
+            derive_from_clip(clip, work, fps=CLIP_FPS)
+        except Exception as e:  # noqa: BLE001
+            print(f"[fail] 派生失败 {pid}: {e}", flush=True)
+            if reporter:
+                reporter.note_error(f"派生失败 {pid}: {e}")
+            fails += 1
+            continue
+
+        artifacts = {}
+        for rel in (
+            "clip.mp4", "dog.mp4", "scan_dog.jpg", "scan_time.jpg",
+            "thumb/clip.mp4", "thumb/dog.mp4", "thumb/scan_dog.jpg", "thumb/scan_time.jpg",
+        ):
+            p = work / rel
+            if p.exists():
+                artifacts[rel] = {"bytes": p.stat().st_size}
+
         meta = PacketMeta(
             packet_id=pid,
             group=v["group"],
@@ -459,7 +636,7 @@ def produce(args, store: Store, n_want: int) -> int:
             roi=list(roi),
             frame_start=frame_start,
             frame_end=frame_end,
-            clip_frames=n_frames,
+            clip_frames=clip_frames,
             step=args.step,
             targets=targets,
             sphere_transform=ann.get("sphere_transform"),
@@ -467,24 +644,34 @@ def produce(args, store: Store, n_want: int) -> int:
             field_corners_pano=ann.get("field_corners_pano"),
             sampling=how,
             produced_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            notes={"source_video": str(v["mp4"]), "crf": args.crf},
+            notes={"source_video": str(v["mp4"]), "crf": args.crf, "decim": decim},
+            decim=decim,
+            clip_fps=CLIP_FPS,
+            artifacts=artifacts,
         )
-        zpath = tmpdir / f"{pid}.zip"
-        write_packet(zpath, meta, clip)
-        size_mb = zpath.stat().st_size / 1e6
+        (work / "meta.json").write_text(meta.to_json(), encoding="utf-8")
+        size_bytes = sum(int(v.get("bytes") or 0) for v in artifacts.values())
+        size_mb = size_bytes / 1e6
 
         if args.dry_run:
             print(f"[dry-run] 本会上传 {pid} ({size_mb:.1f} MB, {len(targets)} 个标注点)", flush=True)
         else:
-            store.upload_file(f"packets/{pid}.zip", zpath)
+            if reporter:
+                reporter.set_stage("上传")
+            store.upload_file(f"{prefix}meta.json", work / "meta.json")
+            for rel in artifacts:
+                store.upload_file(f"{prefix}{rel}", work / rel)
             store.put_json(f"packets/{pid}.meta.json", json.loads(meta.to_json()))
             store.append_line(
                 "produced.jsonl",
                 {"packet_id": pid, "produced_at": meta.produced_at, "sampling": how,
-                 "size_bytes": zpath.stat().st_size, "n_targets": len(targets)},
+                 "size_bytes": size_bytes, "n_targets": len(targets), "prefix": prefix},
             )
-        clip.unlink(missing_ok=True)
-        zpath.unlink(missing_ok=True)
+            if reporter:
+                reporter.produced(
+                    pid, meta, size_bytes=size_bytes, sampling=how,
+                    thumb_dir=work / "thumb",
+                )
 
         used.setdefault(key, []).append((start_sec, end_sec))
         made += 1
@@ -531,6 +718,12 @@ def parse_args():
     p.add_argument("--credentials", default=None)
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument(
+        "--server-timeout",
+        type=float,
+        default=float(os.environ.get("BALL_GT_SERVER_TIMEOUT") or 15),
+        help="问服务端心跳/补池的超时（秒）",
+    )
     return p.parse_args()
 
 

@@ -1,14 +1,20 @@
 [Unit]
-Description=Football ball GT annotation server
+Description=Football ball GT annotation server (v2: scheduling + review + dashboard)
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/opt/ball_gt/server
-Environment=BALL_GT_WORK=/var/lib/ball_gt_work
-Environment=BALL_GT_WORKERS=2
-Environment=BALL_GT_PACKET_MIRROR=/var/lib/ball_gt_packets
+# 中心库与审核包。SQLite 开了 WAL，同目录会多出 -wal / -shm 两个文件，
+# 备份要三个一起拷（或先 `sqlite3 ball_gt.sqlite3 ".backup out.sqlite3"`）
+Environment=BALL_GT_DB=/var/lib/ball_gt/ball_gt.sqlite3
+Environment=BALL_GT_BUNDLES=/var/lib/ball_gt/bundles
+# 产包端按 GET /api/v2/pool 的 want_more 补包，这里是那个目标数的基准
+Environment=BALL_GT_KEEP_AVAILABLE=40
+Environment=BALL_GT_BATCH=10
+# 公网机器，写接口最好加一把共享 token（客户端与产包端带 X-Api-Token）
+# Environment=BALL_GT_API_TOKEN=换成一串随机字符串
 Environment=PYTHONPATH=/opt/ball_gt
 ExecStart=/opt/ball_gt/venv/bin/waitress-serve --listen=127.0.0.1:8780 --threads=6 --channel-timeout=600 app:app
 Restart=always

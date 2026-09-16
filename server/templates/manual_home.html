@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>本地标注站</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2027; --line:#2c313b; --fg:#e6e8ec; --dim:#8b93a1;
+          --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --acc:#60a5fa; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; padding:22px 20px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--dim); margin-bottom:16px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:14px 16px; margin-bottom:14px; }
+  .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .hd { justify-content:space-between; }
+  button { background:transparent; color:var(--fg); border:1px solid var(--line);
+           border-radius:7px; padding:6px 12px; font-size:13px; cursor:pointer; }
+  button:hover { filter:brightness(1.2); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:var(--acc); color:#0b1220; border-color:var(--acc); font-weight:600; }
+  button.on { border-color:var(--acc); color:var(--acc); }
+  button.sm { padding:4px 10px; font-size:12px; }
+  input { background:#0f1115; border:1px solid var(--line); color:var(--fg);
+          border-radius:6px; padding:6px 10px; font-size:13px; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; font-size:12px; }
+  tr.q { cursor:pointer; }
+  tr.q:hover td { background:#232733; }
+  tr.q.sel td { background:#243044; }
+  th.chk, td.chk { width:28px; padding-right:0; }
+  input[type=checkbox] { width:15px; height:15px; accent-color:var(--acc); cursor:pointer; }
+  td.mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .tag { font-size:11px; padding:1px 7px; border-radius:20px; border:1px solid var(--line);
+         color:var(--dim); margin-right:4px; display:inline-block; }
+  .tag.warn { color:var(--warn); border-color:#4a3f22; }
+  .tag.ok { color:var(--ok); border-color:#2f4a39; }
+  .tag.bad { color:var(--bad); border-color:#4a2a2a; }
+  .dim { color:var(--dim); }
+  .err { color:var(--bad); }
+  #status { margin:0 0 12px; padding:10px 12px; background:#111; border:1px solid var(--line);
+            border-radius:8px; color:var(--dim); min-height:40px; }
+  #status.ok { color:var(--ok); } #status.bad { color:var(--bad); }
+  #busy { display:none; position:fixed; top:0; left:0; right:0; z-index:50;
+          background:#1d2027; border-bottom:1px solid var(--line);
+          padding:10px 18px 12px; box-shadow:0 8px 20px rgba(0,0,0,.4); }
+  #busy.on { display:block; }
+  body.busy { padding-top:72px; }
+  #busy .box { max-width:1180px; margin:0 auto; font-size:15px; line-height:1.5; }
+  #busy .box b { display:block; margin-bottom:2px; font-size:16px; }
+  kbd { background:#000; border:1px solid var(--line); border-radius:4px; padding:0 5px; }
+  .who { display:flex; align-items:center; gap:8px; }
+</style>
+</head>
+<body>
+<div id="busy"><div class="box"><b id="busyTitle">处理中</b><div id="busyText"></div></div></div>
+<div class="wrap">
+  <div class="row hd">
+    <div>
+      <h1>本地标注站</h1>
+      <div class="sub">列表和主页一样可选。待审核走审核页；有错误帧再进修复。预标几帧后包仍留在待标注，AI 会优先领。</div>
+    </div>
+    <div class="who">
+      <span class="dim">标注员</span>
+      <input id="who" placeholder="你的名字" autocomplete="nickname" style="width:140px">
+      <button id="refresh">刷新</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row hd">
+      <span>
+        <button id="tabLabel" class="on">待标注</button>
+        <button id="tabReview">待审核</button>
+        <button id="tabRepair">待修复</button>
+      </span>
+      <span class="row">
+        <b id="count">加载中…</b>
+        <button class="primary" id="next">领取下一个</button>
+        <button id="seedNext">预标几帧（帮 AI 起步）</button>
+        <button id="selAll" style="display:none">全选</button>
+        <button id="toLabel" style="display:none">打回待标注</button>
+      </span>
+    </div>
+    <div id="status">点某一行打开；或用上面的按钮领池子里的下一个。</div>
+    <div id="tableWrap" style="margin-top:10px;overflow-x:auto"></div>
+  </div>
+</div>
+<script src="/static/js/manual_home.js?v=20260916requeue"></script>
+</body>
+</html>

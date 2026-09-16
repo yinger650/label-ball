@@ -1,0 +1,8 @@
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+credentials.json
+.env
+*.log
+.packet_cache/

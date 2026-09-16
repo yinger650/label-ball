@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>审核 · 足球 GT</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2027; --line:#2c313b; --fg:#e6e8ec; --dim:#8b93a1;
+          --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; --acc:#60a5fa; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+              font:13px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+              overflow:hidden; display:flex; flex-direction:column; }
+  body { user-select:none; }
+
+  #top { display:flex; align-items:center; gap:10px; padding:7px 12px; flex:none;
+         background:var(--panel); border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  #top .pid { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--dim); }
+  #top .grow { flex:1; }
+  .pill { padding:3px 10px; border:1px solid var(--line); border-radius:20px;
+          font-size:12px; color:var(--dim); white-space:nowrap; }
+  .pill.on { background:var(--acc); color:#0b1220; border-color:var(--acc); font-weight:600; }
+  .pill.ok { color:var(--ok); border-color:#2f4a39; }
+  .pill.warn { color:var(--warn); border-color:#4a3f22; }
+  .pill.bad { color:var(--bad); border-color:#4a2a2a; }
+  a.btn, button { background:transparent; color:var(--fg); border:1px solid var(--line);
+                  border-radius:6px; padding:5px 11px; font-size:13px; cursor:pointer;
+                  text-decoration:none; white-space:nowrap; }
+  button:hover, a.btn:hover { filter:brightness(1.25); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:var(--acc); color:#0b1220; border-color:var(--acc); font-weight:600; }
+  button.good { border-color:#2f4a39; color:var(--ok); }
+  button.bad { border-color:#4a2a2a; color:var(--bad); }
+  button.on { background:var(--acc); color:#0b1220; border-color:var(--acc); font-weight:600; }
+  input, textarea { background:#0f1115; border:1px solid var(--line); color:var(--fg);
+                    border-radius:6px; padding:5px 8px; font-size:13px; font-family:inherit; }
+  #reviewer { width:110px; }
+  /* 密码管理器常把「名字」输入框刷成黄底用户名；盖掉自动填充样式 */
+  #reviewer:-webkit-autofill,
+  #reviewer:-webkit-autofill:hover,
+  #reviewer:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--fg);
+    box-shadow: 0 0 0 1000px #0f1115 inset;
+    transition: background-color 99999s ease-out;
+  }
+  .who { display:flex; align-items:center; gap:6px; }
+  .who-name { font-size:13px; font-weight:600; max-width:140px;
+              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  button.who-edit { padding:3px 8px; font-size:12px; color:var(--dim); }
+
+  .view { display:none; flex:1; min-height:0; }
+  .view.show { display:flex; }
+
+  /* ---- 队列 ---- */
+  #queue { flex-direction:column; overflow:auto; }
+  .wrap { max-width:1100px; width:100%; margin:0 auto; padding:22px 20px 60px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:var(--dim); margin-bottom:18px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:14px 16px; margin-bottom:14px; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; font-size:12px; }
+  tr.q { cursor:pointer; }
+  tr.q:hover td { background:#232733; }
+  td.mono { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .tag { font-size:11px; padding:1px 7px; border-radius:20px; border:1px solid var(--line);
+         color:var(--warn); margin-right:4px; display:inline-block; }
+
+  /* ---- 审核 ---- */
+  #review { flex-direction:column; }
+  #warnbar { flex:none; display:none; padding:5px 12px; font-size:12px;
+             background:#3a2c14; color:var(--warn); border-bottom:1px solid var(--line); }
+  #main { flex:1; min-height:0; display:flex; }
+  #left { flex:1; min-width:0; display:flex; flex-direction:column; }
+  /* 主视觉：全局总览（轨迹 + 当前帧）。局部放大在右侧固定 256。 */
+  #stage { flex:1; min-height:200px; display:flex; justify-content:center; align-items:center;
+           background:#0a0b0e; overflow:hidden; }
+  #overview { display:block; flex:none; background:#000; cursor:crosshair; }
+  #player { display:block; width:256px; height:256px; background:#000; cursor:crosshair; }
+  /* 无审核包时的降级形态：逐帧数值表顶掉播放器 */
+  #tablewrap { flex:1; min-height:0; overflow:auto; display:none; padding:0 4px; }
+  #tablewrap table { font-size:12px; }
+  #tablewrap td { padding:3px 8px; border-bottom:1px solid #23262e; font-family:ui-monospace,Menlo,monospace; }
+  #tablewrap tr.cur td { background:#243046; }
+  #stripwrap { flex:none; padding:6px 10px 2px; background:var(--panel);
+               border-top:1px solid var(--line); }
+  #strip { display:block; width:100%; cursor:pointer; }
+  #rangeHint { font-size:11px; color:var(--dim); margin:2px 0 0; min-height:16px; }
+  #transport { flex:none; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+               padding:6px 10px 8px; background:var(--panel); border-top:1px solid var(--line); }
+
+  #side { flex:none; width:280px; border-left:1px solid var(--line); background:var(--panel);
+          overflow-y:auto; padding:10px 12px 40px; }
+  #side h3 { font-size:12px; color:var(--dim); font-weight:500; margin:14px 0 6px;
+             text-transform:none; }
+  #side h3:first-child { margin-top:0; }
+  #zoom { width:256px; height:256px; margin:0 auto; background:#000;
+          border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  #chart { display:block; width:100%; background:#0f1115;
+           border:1px solid var(--line); border-radius:6px; cursor:pointer; }
+  .kv { display:grid; grid-template-columns:82px 1fr; gap:2px 8px; font-size:12px; }
+  .kv b { color:var(--dim); font-weight:400; }
+  .kv span { font-family:ui-monospace,Menlo,monospace; }
+  #notes { width:100%; height:54px; resize:vertical; }
+  details { font-size:12px; color:var(--dim); }
+  summary { cursor:pointer; color:var(--fg); }
+  kbd { background:#000; border:1px solid var(--line); border-radius:4px;
+        padding:0 5px; font-family:ui-monospace,Menlo,monospace; color:var(--fg); }
+  .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--dim); }
+  .legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; }
+
+  #toast { position:fixed; left:50%; top:54px; transform:translateX(-50%); z-index:9;
+           background:rgba(16,18,22,.96); border:1px solid var(--line); border-radius:8px;
+           padding:9px 16px; display:none; align-items:center; gap:12px; max-width:70vw; }
+</style>
+</head>
+<body>
+
+<div id="top">
+  <span class="pid" id="pid">审核</span>
+  <span class="pill" id="pSub"></span>
+  <span class="pill" id="pModel"></span>
+  <span class="pill" id="pQc"></span>
+  <span class="grow"></span>
+  <span class="who">
+    <span style="color:var(--dim);font-size:12px">审核员</span>
+    <span id="reviewerShown" class="who-name" hidden></span>
+    <button type="button" class="who-edit" id="reviewerEdit" hidden title="更换审核员名字">改</button>
+    <!-- 绝不能 autocomplete=username：密码管理器会当登录框，每次刷新把记住的名字盖掉 -->
+    <input id="reviewer" name="ball_gt_reviewer" placeholder="你的名字"
+           autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false"
+           data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other"
+           readonly>
+  </span>
+  <span id="revBtns" style="display:none">
+    <button class="good" id="bAccept">整包通过 Y</button>
+    <button class="bad" id="bReject">整包打回 N</button>
+    <button class="good" id="bRangeOk">本段正确 O</button>
+    <button class="bad" id="bRangeBad">本段错误 B</button>
+    <button id="bRejectFrame">打回本帧 X</button>
+    <button class="primary" id="bSubmit">提交裁决 S</button>
+    <button class="bad" id="bAbandon">抛弃本包</button>
+  </span>
+  <a class="btn" href="/review">队列</a>
+</div>
+
+<!-- ---------------------------------------------------------------- 队列 -->
+<div class="view" id="queue">
+  <div class="wrap">
+    <h1>审核队列</h1>
+    <div class="sub">待审是还没进 GT 的 AI 提交；已入库（含人工 / agent）也可以再打开打回。</div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>
+          <button id="qTabPending" class="on">待审</button>
+          <button id="qTabAccepted">已入库</button>
+        </span>
+        <span>
+          <b id="qCount">加载中…</b>
+          <button id="qFirst">审第一条 (Enter)</button>
+          <button id="qRefresh">刷新</button>
+        </span>
+      </div>
+      <table id="qTable" style="margin-top:10px"><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- ---------------------------------------------------------------- 审核 -->
+<div class="view" id="review">
+  <div id="warnbar"></div>
+  <div id="main">
+    <div id="left">
+      <div id="stage"><canvas id="overview"></canvas></div>
+      <div id="tablewrap"><table><tbody id="tbody"></tbody></table></div>
+      <div id="stripwrap">
+        <canvas id="strip"></canvas>
+        <div id="rangeHint"></div>
+      </div>
+      <div id="transport">
+        <button id="bPlay" style="width:74px">播放 ␣</button>
+        <button id="bPrev">, 退</button>
+        <button id="bNext">. 进</button>
+        <span class="pill" id="pFps">12 fps</span>
+        <button id="bSlower">−</button>
+        <button id="bFaster">=</button>
+        <button id="bPane">滤波图 W</button>
+        <button id="bScan">Scan E</button>
+        <button id="bMode">固定区域 F</button>
+        <button id="bLoop" class="on">循环</button>
+        <button id="bPing">摆动</button>
+        <button id="bIn">标记头 [</button>
+        <button id="bOut">标记尾 ]</button>
+        <button id="bClrRange">全段 \</button>
+        <button id="bSus">可疑 J/K</button>
+        <span class="grow" style="flex:1"></span>
+        <button id="bEscalate">转标注（下高清）</button>
+        <button id="bLocal">本地打开 L</button>
+        <button id="bReload">重载 R</button>
+      </div>
+    </div>
+
+    <div id="side">
+      <h3>局部放大（256×256）</h3>
+      <div id="zoom"><canvas id="player" width="256" height="256"></canvas></div>
+      <h3>pano_x / pano_y 随帧号变化</h3>
+      <canvas id="chart" height="180"></canvas>
+      <h3>当前帧</h3>
+      <div class="kv" id="kv"></div>
+      <h3>色条图例</h3>
+      <div class="legend">
+        <span><i style="background:#4ade80"></i>正常</span>
+        <span><i style="background:#fbbf24"></i>插值</span>
+        <span><i style="background:#f87171"></i>低置信 &lt;0.4</span>
+        <span><i style="background:#5b6270"></i>不可见</span>
+        <span><i style="background:#0f1115;border:1px solid #f87171"></i>已打回</span>
+        <span><i style="background:#60a5fa"></i>本段头/尾</span>
+      </div>
+      <h3>裁决</h3>
+      <div id="decInfo" style="font-size:12px;color:var(--dim);margin-bottom:6px"></div>
+      <textarea id="notes" placeholder="备注（可选）"></textarea>
+      <h3>键位</h3>
+      <details open>
+        <summary>展开 / 收起</summary>
+        <div style="margin-top:6px;line-height:2">
+          <kbd>空格</kbd> 播放/暂停 · <kbd>,</kbd><kbd>.</kbd> 逐帧退/进 · <kbd>-</kbd><kbd>=</kbd> 速度<br>
+          <kbd>W</kbd> 原图/DoG · <kbd>E</kbd> 主画面切 Scan 时间彩色 · <kbd>F</kbd> 局部跟随/固定区域<br>
+          <kbd>J</kbd><kbd>K</kbd> 下一个/上一个可疑帧（低置信或插值）<br>
+          <kbd>[</kbd>/<kbd>H</kbd> 标记头 · <kbd>]</kbd>/<kbd>T</kbd> 标记尾 · <kbd>\</kbd> 恢复全段<br>
+          <kbd>O</kbd> 本段正确 · <kbd>B</kbd> 本段错误 · <kbd>X</kbd> 打回/取消当前帧<br>
+          <kbd>Y</kbd> 整包通过 · <kbd>N</kbd> 整包打回（时间轴全部打叉）<br>
+          <kbd>S</kbd> 提交裁决 · <kbd>R</kbd> 重新载入 · <kbd>L</kbd> 在本地人工工具打开<br>
+          点主画面轨迹、色条或曲线图都能跳帧。
+        </div>
+      </details>
+      <h3>素材</h3>
+      <div id="bundleInfo" style="font-size:12px;color:var(--dim)"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/gtplayer.js?v=20260916scan"></script>
+<script>
+/* 足球 GT 审核页：队列 + 裁决。播放器见 gtplayer.js。 */
+'use strict';
+
+const $ = (s) => document.querySelector(s);
+const REVIEWER_KEY = 'ball_gt_reviewer';
+const LOCAL_PORT_KEY = 'ball_gt_local_port';
+
+const SID = (() => {
+  const seg = location.pathname.replace(/\/+$/, '').split('/').pop();
+  return /^\d+$/.test(seg) ? parseInt(seg, 10) : null;
+})();
+
+const R = { data: null, player: null, isManual: false };
+
+async function jget(u) {
+  const r = await fetch(u);
+  const d = await r.json().catch(() => ({ error: '返回不是 JSON' }));
+  if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+  return d;
+}
+
+function toast(msg, ms, action) { return gtToast(msg, ms, action); }
+function hideToast() { gtHideToast(); }
+
+function reviewer() {
+  return ($('#reviewer').value || localStorage.getItem(REVIEWER_KEY) || '').trim();
+}
+function persistReviewer(name) {
+  const v = (name == null ? reviewer() : String(name)).trim();
+  if (v) localStorage.setItem(REVIEWER_KEY, v);
+  else localStorage.removeItem(REVIEWER_KEY);
+  return v;
+}
+function showReviewerChip(name) {
+  const input = $('#reviewer');
+  const shown = $('#reviewerShown');
+  const edit = $('#reviewerEdit');
+  bindReviewer.editing = false;
+  if (name) {
+    input.value = name;
+    input.hidden = true;
+    shown.hidden = false;
+    shown.textContent = name;
+    edit.hidden = false;
+  } else {
+    input.hidden = false;
+    shown.hidden = true;
+    edit.hidden = true;
+  }
+}
+function editReviewer() {
+  const input = $('#reviewer');
+  bindReviewer.editing = true;
+  $('#reviewerShown').hidden = true;
+  $('#reviewerEdit').hidden = true;
+  input.hidden = false;
+  input.removeAttribute('readonly');
+  input.focus();
+  input.select();
+}
+function bindReviewer() {
+  const input = $('#reviewer');
+  const saved = (localStorage.getItem(REVIEWER_KEY) || '').trim();
+  input.value = saved;
+  showReviewerChip(saved);
+  let touched = false;
+  const unlock = () => input.removeAttribute('readonly');
+  input.addEventListener('pointerdown', unlock);
+  input.addEventListener('focus', unlock);
+  input.addEventListener('keydown', () => { touched = true; });
+  input.addEventListener('paste', () => { touched = true; });
+  input.addEventListener('input', () => {
+    if (!touched) {
+      input.value = (localStorage.getItem(REVIEWER_KEY) || '').trim();
+      return;
+    }
+    persistReviewer(input.value);
+  });
+  input.addEventListener('blur', () => {
+    input.setAttribute('readonly', '');
+    const v = persistReviewer(input.value);
+    if (v) showReviewerChip(v);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.code === 'Enter') { e.preventDefault(); input.blur(); }
+  });
+  $('#reviewerEdit').onclick = editReviewer;
+  const restore = () => {
+    if (bindReviewer.editing) return;
+    const want = (localStorage.getItem(REVIEWER_KEY) || '').trim();
+    if (!want) return;
+    if (input.value.trim() !== want) input.value = want;
+    if (input.hidden) $('#reviewerShown').textContent = want;
+    else showReviewerChip(want);
+  };
+  requestAnimationFrame(restore);
+  setTimeout(restore, 50);
+  setTimeout(restore, 300);
+}
+
+function warn(lines) {
+  const el = $('#warnbar');
+  if (!lines.length) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.textContent = '⚠ ' + lines.join('　|　');
+}
+
+/* ---------------------------------------------------------------- 队列 */
+
+function queueTab() {
+  return new URLSearchParams(location.search).get('tab') === 'accepted' ? 'accepted' : 'pending';
+}
+function setQueueTab(tab) {
+  const want = tab === 'accepted' ? 'accepted' : 'pending';
+  const url = want === 'accepted' ? '/review?tab=accepted' : '/review';
+  if (location.pathname + location.search !== url) history.replaceState(null, '', url);
+  $('#qTabPending').classList.toggle('on', want === 'pending');
+  $('#qTabAccepted').classList.toggle('on', want === 'accepted');
+  return want;
+}
+
+async function loadQueue() {
+  $('#queue').classList.add('show');
+  const tab = setQueueTab(queueTab());
+  const q = tab === 'accepted'
+    ? '/api/v2/submissions?state=accepted&source=all&limit=500'
+    : '/api/v2/submissions?state=pending&source=all';
+  try {
+    const d = await jget(q);
+    const rows = d.submissions || [];
+    $('#qCount').textContent = rows.length
+      ? (tab === 'accepted' ? `${rows.length} 条已入库` : `${rows.length} 条待审`)
+      : (tab === 'accepted' ? '没有已入库的提交' : '队列是空的');
+    $('#qFirst').disabled = !rows.length;
+    const head = '<tr><th>submission</th><th>packet</th><th>来源</th><th>模型 / 工人</th>'
+               + '<th>覆盖</th><th>均值置信</th><th>插值</th><th>QC</th><th></th></tr>';
+    const empty = tab === 'accepted' ? '没有已入库的提交' : '没有待审的提交';
+    $('#qTable tbody').innerHTML = head + rows.map((r) => {
+      const cov = r.coverage === null || r.coverage === undefined
+        ? '—' : Math.round(r.coverage * 100) + '%';
+      const mc = r.mean_conf === null || r.mean_conf === undefined ? '—' : r.mean_conf.toFixed(2);
+      const mcCls = (r.mean_conf !== null && r.mean_conf !== undefined && r.mean_conf < 0.6) ? 'style="color:var(--bad)"' : '';
+      const src = r.source === 'human' ? '人工/agent' : (r.source || '—');
+      const tags = (r.qc_flags || []).map((f) => `<span class="tag">${f}</span>`).join('')
+                 + (r.has_bundle ? '' : '<span class="tag">无审核包</span>');
+      return `<tr class="q" data-id="${r.submission_id}">
+        <td class="mono">#${r.submission_id}</td>
+        <td class="mono">${r.packet_id}</td>
+        <td>${src}</td>
+        <td>${r.model_used || r.workflow || r.worker || '—'}</td>
+        <td>${r.n_labeled}/${r.n_targets}（${cov}）</td>
+        <td ${mcCls}>${mc}</td>
+        <td>${r.n_interp || 0}</td>
+        <td>${tags || '—'}</td>
+        <td style="text-align:right"><button>${tab === 'accepted' ? '再审' : '审核'}</button></td></tr>`;
+    }).join('') || `<tr><td style="color:var(--dim)">${empty}</td></tr>`;
+    $('#qTable').querySelectorAll('tr.q').forEach((tr) => {
+      tr.onclick = () => { location.href = '/review/' + tr.dataset.id; };
+    });
+    $('#qFirst').onclick = () => { if (rows.length) location.href = '/review/' + rows[0].submission_id; };
+  } catch (e) {
+    $('#qCount').innerHTML = `<span style="color:var(--bad)">队列加载失败：${e.message}</span>`;
+  }
+}
+
+/* ---------------------------------------------------------------- 播放器侧栏 */
+
+function renderSide(P) {
+  const f = P.cur();
+  const n = P.frames.length;
+  if (!f) { $('#kv').innerHTML = '<b>—</b><span>没有帧</span>'; return; }
+  const cf = f.conf === null || f.conf === undefined ? '—' : f.conf.toFixed(2);
+  const cCls = (f.conf !== null && f.conf < GT_LOW_CONF) ? 'style="color:var(--bad)"' : '';
+  const rows = [
+    ['序号', `${P.i + 1} / ${n}`],
+    ['frame_idx', f.frame_idx],
+    ['pano_x/y', `${gtFmt(f.pano_x)}, ${gtFmt(f.pano_y)}`],
+    ['conf', `<span ${cCls}>${cf}</span>`],
+    ['状态', [f.visible ? '可见' : '不可见', f.interp ? '插值' : '', f.occluded ? '遮挡' : '',
+              f.blurred ? '拖影' : '', P.series && P.series.out[P.i] ? '离群' : '',
+              f.noLabel ? 'labels 无此帧' : ''].filter(Boolean).join(' / ')],
+    ['stages', (f.stages || []).join(' → ') || '—'],
+    ['motion_px', gtFmt(f.motion_px)],
+    ['本帧裁决', P.isRejected(f) ? '<span style="color:var(--bad)">打回</span>' : '通过'],
+  ];
+  $('#kv').innerHTML = rows.map(([k, v]) => `<b>${k}</b><span>${v}</span>`).join('');
+
+  const dec = effectiveDecision();
+  const txt = { accept: '整包通过', reject: '整包打回', partial: `逐帧：打回 ${P.rejected.size} 帧` }[dec];
+  $('#decInfo').innerHTML = `当前裁决：<b style="color:${dec === 'reject' ? 'var(--bad)' : dec === 'partial' ? 'var(--warn)' : 'var(--ok)'}">${txt}</b>`
+    + (P.decision ? '（手动指定）' : '（按打回帧自动推定）');
+
+  const [lo, hi] = P.rangeBounds();
+  const nRange = hi - lo + 1;
+  const nBad = P.frames.slice(lo, hi + 1).filter((fr) => P.isRejected(fr)).length;
+  const allRejected = P.frames.length && P.frames.every((fr) => P.rejected.has(fr.frame_idx));
+  const hint = $('#rangeHint');
+  if (hint) {
+    hint.innerHTML = allRejected
+      ? `<span style="color:var(--bad)">时间轴：整包 ${P.frames.length} 帧已打回</span>`
+      : `本段 ${P.frames[lo].frame_idx} → ${P.frames[hi].frame_idx}（${nRange} 帧，打回 ${nBad}）· O 正确 / B 错误`;
+  }
+}
+
+function effectiveDecision() {
+  const P = R.player;
+  if (!P) return 'accept';
+  if (P.decision) return P.decision;
+  return P.rejected.size ? 'partial' : 'accept';
+}
+
+async function loadSubmission(id) {
+  $('#review').classList.add('show');
+  $('#revBtns').style.display = 'inline';
+  let d;
+  try { d = await jget('/api/v2/submission/' + id); }
+  catch (e) {
+    $('#warnbar').style.display = 'block';
+    $('#warnbar').textContent = '加载失败：' + e.message;
+    return;
+  }
+  R.data = d;
+  const P = R.player;
+  P.rejected = new Set();
+  P.decision = null;
+  const warns = P.loadBundle(d);
+  const s = d.submission || {};
+  const p = d.packet || {};
+  if (!P.hasCells && !(P.source && P.source.kind === 'thumb'))
+    warns.push('这条提交没有缩略视频，只能看曲线与数值表，仍可通过 / 打回');
+  if (s.state && s.state !== 'pending') {
+    warns.push('已入库，可再次审核。打回会从 GT 删除对应帧，包转待修补');
+  }
+  $('#pid').textContent = s.packet_id || p.packet_id || '';
+  $('#pSub').textContent = `#${s.submission_id} · ${s.state || ''} · ${s.n_labeled || 0}/${s.n_targets || 0} 帧`
+    + (s.n_visible !== undefined ? ` · 可见 ${s.n_visible}` : '');
+  $('#pModel').textContent = [s.model_used, s.workflow, s.worker].filter(Boolean).join(' · ') || '—';
+  const qc = s.qc || {};
+  const flags = qc.flags || [];
+  $('#pQc').textContent = flags.length ? 'QC：' + flags.join(' / ')
+    : `均值置信 ${gtFmt(s.mean_conf, 2)} · 插值 ${s.n_interp || 0}`;
+  $('#pQc').className = 'pill' + (flags.length ? ' bad' : ' ok');
+  const files = (d.thumb && d.thumb.files) || (d.bundle && d.bundle.files) || [];
+  const meta = (d.packet && d.packet.meta) || {};
+  $('#bundleInfo').innerHTML = [
+    `缩略件：${files.length ? files.join('、') : '（无）'}`,
+    `fps=${meta.fps || P.man && P.man.fps || '?'} · clip_fps=${meta.clip_fps || 30} · decim=${meta.decim || 1} · step=${meta.step || '?'}`,
+    `生产 ${gtFmt(d.packet && d.packet.produced_at, 0)} · 标注 ${gtFmt(d.packet && d.packet.labeled_at, 0)} · 审核 ${gtFmt(d.packet && d.packet.reviewed_at, 0)}`,
+    `耗时 ${gtFmt(s.elapsed_sec, 0)}s · VLM 调用 ${s.n_vlm_calls || 0} 次`,
+    (d.reviews && d.reviews.length) ? `已有 ${d.reviews.length} 条历史审核记录` : '',
+  ].filter(Boolean).join('<br>');
+  warn(warns);
+  P.seek(0);
+}
+
+function toggleRejectFrame() {
+  const P = R.player;
+  const f = P.cur();
+  if (!f) return;
+  if (P.rejected.has(f.frame_idx)) { P.rejected.delete(f.frame_idx); toast(`取消打回 ${f.frame_idx}`, 900); }
+  else { P.rejected.add(f.frame_idx); toast(`打回帧 ${f.frame_idx}`, 900); }
+  P.decision = null;
+  P.draw();
+}
+
+function setDecision(d) {
+  const P = R.player;
+  if (d === 'reject') {
+    P.frames.forEach((f) => P.rejected.add(f.frame_idx));
+    P.decision = 'reject';
+    toast('已整包打回，时间轴已全部打叉。按 S 提交，或用 [ ] 再标一段为正确', 2400);
+  } else {
+    P.rejected.clear();
+    P.decision = 'accept';
+    toast('已选整包通过，按 S 提交', 1800);
+  }
+  P.draw();
+}
+
+function applyRange(ok) {
+  const P = R.player;
+  const [lo, hi] = P.rangeBounds();
+  for (let i = lo; i <= hi; i++) {
+    const f = P.frames[i];
+    if (!f) continue;
+    if (ok) P.rejected.delete(f.frame_idx);
+    else P.rejected.add(f.frame_idx);
+  }
+  P.decision = null;
+  const a = P.frames[lo] && P.frames[lo].frame_idx;
+  const b = P.frames[hi] && P.frames[hi].frame_idx;
+  toast(`本段 ${a} → ${b}（${hi - lo + 1} 帧）标为${ok ? '正确' : '错误'}`, 1400);
+  P.draw();
+}
+
+async function submit() {
+  const rv = reviewer();
+  if (!rv) {
+    showReviewerChip('');
+    const el = $('#reviewer');
+    el.removeAttribute('readonly');
+    el.focus();
+    toast('请先在右上角填审核员名字', 2200);
+    return;
+  }
+  localStorage.setItem(REVIEWER_KEY, rv);
+  const P = R.player;
+  const dec = effectiveDecision();
+  const frames = {};
+  if (dec === 'partial') P.rejected.forEach((fi) => { frames[String(fi)] = false; });
+  const desc = { accept: '整包通过', reject: '整包打回', partial: `打回 ${P.rejected.size} 帧、其余通过` }[dec];
+  if (!confirm(`提交裁决：${desc}\n审核员：${rv}`)) return;
+  P.stop();
+  $('#bSubmit').disabled = true;
+  try {
+    const r = await fetch('/api/v2/review/' + R.data.submission.submission_id, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reviewer: rv, decision: dec, frames, notes: $('#notes').value || '' }),
+    });
+    const d = await r.json().catch(() => ({ error: '返回不是 JSON' }));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    afterSubmit(d);
+  } catch (e) {
+    toast('提交失败：' + (e.message || e), 4000);
+  }
+  $('#bSubmit').disabled = false;
+}
+
+function afterSubmit(d) {
+  const next = R.data.next_submission_id;
+  const removed = (d.n_gt_removed || 0) ? ` · 从 GT 删 ${d.n_gt_removed} 帧` : '';
+  const head = `已提交：${d.decision} · 入库 ${d.n_gt_written} 帧 · 打回 ${d.n_rejected} 帧${removed} · 包状态 ${d.packet_state}`;
+  const pid = (R.data.submission && R.data.submission.packet_id) || '';
+  const queueUrl = ((R.data.submission || {}).state === 'pending') ? '/review' : '/review?tab=accepted';
+
+  if (R.isManual && (d.n_rejected || 0) > 0 && pid) {
+    toast(head + '。可进入修复页改点', 0, {
+      label: '去修复',
+      fn: () => { location.href = '/a/' + encodeURIComponent(pid); },
+    });
+    return;
+  }
+  if (!next) {
+    toast(head + '，返回队列…', 0);
+    setTimeout(() => { location.href = R.isManual ? '/?tab=review' : queueUrl; }, 1500);
+    return;
+  }
+  let left = 2;
+  let timer = null;
+  const go = () => { location.href = '/review/' + next; };
+  const cancel = () => { clearInterval(timer); hideToast(); toast('已留在本页，队列在右上角', 1800); };
+  const show = () => toast(`${head}。${left}s 后自动审下一条 #${next}`, 0, { label: '留在本页', fn: cancel });
+  show();
+  timer = setInterval(() => {
+    left -= 1;
+    if (left <= 0) { clearInterval(timer); go(); } else show();
+  }, 1000);
+}
+
+function localToolUrl(pid) {
+  const q = new URLSearchParams(location.search).get('localPort');
+  if (q && /^\d+$/.test(q)) localStorage.setItem(LOCAL_PORT_KEY, q);
+  const port = localStorage.getItem(LOCAL_PORT_KEY) || '8781';
+  return 'http://127.0.0.1:' + port + '/a/' + encodeURIComponent(pid);
+}
+function openLocal() {
+  const pid = (R.data && R.data.submission && R.data.submission.packet_id) || '';
+  if (!pid) return;
+  if (R.isManual) { location.href = '/a/' + encodeURIComponent(pid); return; }
+  window.open(localToolUrl(pid), '_blank');
+  toast('已尝试打开本地人工工具（默认 8781）；打不开请先在本机运行 client/manual.py', 3200);
+}
+
+async function abandonPacket() {
+  const pid = (R.data && R.data.submission && R.data.submission.packet_id) || '';
+  if (!pid) return;
+  const rv = reviewer();
+  if (!rv) { toast('请先填审核员名字', 2200); return; }
+  if (!confirm('抛弃本包：数据质量不行，将从审核和修复队列移除，且不入库。\n\n如果只是没有球，请取消，整包打回后在修复页标不可见再提交。')) {
+    return;
+  }
+  try {
+    const r = await fetch('/api/v2/abandon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packet_id: pid, reviewer: rv, worker: rv, reason: 'bad_quality' }),
+    });
+    const d = await r.json().catch(() => ({ error: '返回不是 JSON' }));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    toast('已抛弃本包，返回队列…', 1400);
+    setTimeout(() => { location.href = R.isManual ? '/?tab=review' : '/review'; }, 1200);
+  } catch (e) {
+    toast('抛弃失败：' + (e.message || e), 3000);
+  }
+}
+
+function bindReview() {
+  R.player = new GTPlayer({ onDraw: renderSide });
+  R.player.bindTransport();
+  $('#bLocal').onclick = openLocal;
+  const bEsc = $('#bEscalate');
+  if (bEsc) {
+    bEsc.style.display = R.isManual ? '' : 'none';
+    bEsc.onclick = async () => {
+      const pid = (R.data && R.data.packet && R.data.packet.packet_id) || '';
+      if (!pid) return;
+      toast('开始下载高清…', 2000);
+      try {
+        const r = await fetch('/api/prepare/' + encodeURIComponent(pid), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || r.status);
+        location.href = '/a/' + encodeURIComponent(pid);
+      } catch (e) {
+        toast('转标注失败：' + (e.message || e), 3000);
+      }
+    };
+  }
+  $('#bReload').onclick = () => loadSubmission(SID);
+  $('#bAccept').onclick = () => setDecision('accept');
+  $('#bReject').onclick = () => setDecision('reject');
+  $('#bRangeOk').onclick = () => applyRange(true);
+  $('#bRangeBad').onclick = () => applyRange(false);
+  $('#bRejectFrame').onclick = toggleRejectFrame;
+  $('#bSubmit').onclick = submit;
+  $('#bAbandon').onclick = abandonPacket;
+}
+
+function bindKeys() {
+  window.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) {
+      if (e.code === 'Escape') t.blur();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (SID === null) {
+      if (e.code === 'Enter') { e.preventDefault(); $('#qFirst').click(); }
+      return;
+    }
+    if (R.player && R.player.handlePlayKey(e)) return;
+    switch (e.code) {
+      case 'KeyY': setDecision('accept'); return;
+      case 'KeyN': setDecision('reject'); return;
+      case 'KeyO': applyRange(true); return;
+      case 'KeyB': applyRange(false); return;
+      case 'KeyX': toggleRejectFrame(); return;
+      case 'KeyL': openLocal(); return;
+      case 'KeyS': e.preventDefault(); submit(); return;
+      case 'KeyR': loadSubmission(SID); return;
+      case 'Escape': hideToast(); return;
+      default: return;
+    }
+  });
+}
+
+(async function main() {
+  bindReviewer();
+  bindKeys();
+  try {
+    const w = await jget('/api/whoami');
+    R.isManual = w.mode === 'manual';
+    if (R.isManual) {
+      const a = document.querySelector('a.btn[href="/review"]');
+      if (a) { a.href = '/?tab=review'; a.textContent = '列表'; }
+    }
+  } catch (e) { /* 公网站 whoami 也有 */ }
+  if (SID === null) {
+    $('#qTabPending').onclick = () => { setQueueTab('pending'); loadQueue(); };
+    $('#qTabAccepted').onclick = () => { setQueueTab('accepted'); loadQueue(); };
+    $('#qRefresh').onclick = loadQueue;
+    loadQueue();
+  } else {
+    bindReview();
+    loadSubmission(SID);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+---
+description: 本项目每次会话必须向 AgentBoard 上报开始、结束，被打断时必须 fail
+alwaysApply: true
+---
+
+# AgentBoard 会话上报
+
+本项目**每一次会话/任务**都必须向 Agentboard 上报：
+
+1. **开始时**：立刻 `start`，用一句话描述正在做什么
+2. **结束时**：成功 `succeed`（已完成 + 结果），失败 `fail`（原因）
+3. **被打断时**：用户停止、无法继续、会话被系统掐掉前，必须 `interrupt` 或 `fail "任务被打断：原因"`。禁止只 `start` 不收口。长等待要 `progress`。
+
+Token 在仓库根目录 `.env` 的 `AGENTBOARD_TOKEN`。脚本会自动读取 `.env`。未设置 token 时：本机 board-client 若开了 ingest，仍会投影到 `proj-*`；两边都没有则静默跳过。**不要**因此失败，也**不要**向用户索要或打印 token。
+
+每次 `start` 一条新 Run。不要设置 `AGENTBOARD_RUN_KEY`，除非明确要续同一条 Run。
+
+## 双通道
+
+- `AGENTBOARD_TOKEN` → 项目 **virtual machine**
+- 本机 `board-client` 的 `ABP_MACHINE_TOKEN` + 本机 ingest → 物理机 `proj-*`
+- **两把 machine key 都在时，同一条会话日志会同时出现在两边。** wrap 与 `report.py` 才互斥。
+
+## 怎么发
+
+```bash
+export AGENTBOARD_PROVIDER="${AGENTBOARD_PROVIDER:-cursor}"
+python3 skills/agentboard-report/scripts/report.py start "一句话：正在做什么"
+python3 skills/agentboard-report/scripts/report.py succeed "已完成：结果摘要"
+python3 skills/agentboard-report/scripts/report.py fail "失败原因"
+python3 skills/agentboard-report/scripts/report.py interrupt "用户停止"
+```
+
+完整协议见 `skills/agentboard-report/SKILL.md`。安装教程：`docs/agent-report-tutorial.md`。
+
+## 其它触发（长程任务额外做）
+
+| 时机 | 命令 |
+|---|---|
+| 关键里程碑 | `progress "现在做到哪"` |
+| 工具/运行时内部错误 | `error "原因"` |
+| 每个 turn 开头，或每 ~60s（OpenClaw 必做） | `heartbeat "alive"` |
+
+OpenClaw：session 一开始就 `heartbeat`，并尽量保持周期心跳。TTL 默认 180 秒。
+
+## 禁止
+
+- 打印、提交、粘贴 `AGENTBOARD_TOKEN` 或 `.env` 内容
+- 用 viewer token（`abp_v_`）上报
+- 因为上报失败而停下用户任务
