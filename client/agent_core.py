@@ -572,9 +572,474 @@ class AgentSession:
             "predicted": pred,
             "hint": (
                 "已标可见点 ≥2 个时，predicted.center 就是下一帧的外推中心，直接喂给 "
-                "ball_view(mode='crop', center=...)；一个都没有就先 mode='global' 定位。"
+                "ball_view(mode='crop', center=..., size=240)；一个都没有就先 "
+                "ball_overview / ball_scan 找人、找轨迹。"
             ),
         }
+
+    # ------------------------------------------------------------ v3 工具面
+
+    def _cand_path(self, pid: str) -> Path:
+        return workspace(self.work_root, pid) / "candidates.json"
+
+    def _load_cands(self, pid: str) -> Dict[str, List[dict]]:
+        d = self._read_json(self._cand_path(pid))
+        raw = d.get("frames") if isinstance(d.get("frames"), dict) else d
+        out: Dict[str, List[dict]] = {}
+        if isinstance(raw, dict):
+            for k, v in raw.items():
+                if isinstance(v, list):
+                    out[str(int(k))] = [x for x in v if isinstance(x, dict)]
+        return out
+
+    def _save_cands(self, pid: str, frames: Dict[str, List[dict]]) -> None:
+        p = self._cand_path(pid)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"frames": frames}, ensure_ascii=False), encoding="utf-8")
+
+    def _anchors(self, pid: str, sess: dict, meta: dict) -> List[Tuple[int, float, float]]:
+        prep = self.prep(pid)
+        pts: List[Tuple[int, float, float]] = []
+        for r in self._progress(pid, sess, meta)["labels"].values():
+            if r.get("visible") and r.get("pano_x") is not None:
+                rx, ry = prep.to_roi(float(r["pano_x"]), float(r["pano_y"]))
+                pts.append((int(r["frame_idx"]), rx, ry))
+        pts.sort()
+        return pts
+
+    def plan(self, packet_id: str) -> dict:
+        """每帧状态 + 下一步该覆盖哪几段。agent 不用自己记进度。"""
+        from client import field as F
+        from client import sample as S
+
+        sess = self.load_session(packet_id)
+        if not is_ready(self.work_root, packet_id):
+            job = self.job_state(packet_id)
+            return {"error": f"{packet_id} 还没准备好（{job['state']}: {job['msg']}）"}
+        prep = self.prep(packet_id)
+        meta = self._meta_dict(packet_id, sess)
+        prog = self._progress(packet_id, sess, meta)
+        cands = self._load_cands(packet_id)
+        anchors = self._anchors(packet_id, sess, meta)
+        step = int(meta.get("step") or 1)
+        want = S.schedule(prog["targets"], anchors, step=step)
+        geom = F.build(prep)
+        frames_state = []
+        for fi in prog["targets"]:
+            key = str(int(fi))
+            rec = prog["labels"].get(key)
+            if rec and rec.get("visible") and rec.get("pano_x") is not None:
+                st = "labeled"
+            elif rec and rec.get("visible") is False:
+                st = "absent"
+            elif key in cands:
+                st = "nominated"
+            else:
+                st = "empty"
+            frames_state.append({
+                "frame_idx": int(fi),
+                "state": st,
+                "query": int(fi) in set(want),
+                "n_cands": len(cands.get(key) or []),
+            })
+        empty = [f["frame_idx"] for f in frames_state if f["state"] == "empty"]
+        return {
+            "packet_id": packet_id,
+            "roi": meta["roi"],
+            "roi_size": list(prep.size),
+            "step": step,
+            "n_targets": prog["n_targets"],
+            "n_labeled": prog["n_labeled"],
+            "n_visible": prog["n_visible"],
+            "n_nominated": sum(1 for f in frames_state if f["state"] == "nominated"),
+            "field_air_margin": getattr(geom, "air_margin", None),
+            "query_frames": want,
+            "empty_frames": empty[:40],
+            "frames": frames_state,
+            "next": (
+                "cold: ball_overview 看人，再 ball_scan 描轨迹"
+                if len(anchors) < 2
+                else f"对 query_frames（{len(want)} 帧）ball_strip + ball_nominate，然后 ball_fit"
+            ),
+        }
+
+    def render_overview(self, packet_id: str, frame_idx: Any = None) -> dict:
+        """全景三段 1:1 raw，粗格子。看人，不定点。"""
+        if not is_ready(self.work_root, packet_id):
+            job = self.job_state(packet_id)
+            return {"error": f"{packet_id} 还没准备好（{job['state']}: {job['msg']}）"}
+        prep = self.prep(packet_id)
+        sess = self.load_session(packet_id)
+        meta = self._meta_dict(packet_id, sess)
+        if frame_idx is None:
+            frame_idx = (meta.get("targets") or [None])[0]
+        try:
+            fi = int(frame_idx)
+        except (TypeError, ValueError):
+            return {"error": f"frame_idx 不是整数: {frame_idx!r}"}
+        master, strips = V.make_overview_view(prep, fi, layers=("raw",))
+        view_id = self._view_id("overview", fi, ["ov", "raw"])
+        paths = [self._write_png(packet_id, view_id, i, sv.image) for i, sv in enumerate(strips)]
+        ref = ViewRef(
+            view_id=view_id, packet_id=packet_id, frame_idx=fi, mode="overview",
+            view=master, paths=paths, panes=["raw"],
+        )
+        self._register(ref)
+        return {
+            "view_id": view_id,
+            "packet_id": packet_id,
+            "frame_idx": fi,
+            "mode": "overview",
+            "cols": master.cols,
+            "rows": master.rows,
+            "letters": master.letters(),
+            "cell_w_px": round(master.cell_w, 1),
+            "cell_h_px": round(master.cell_h, 1),
+            "image_paths": [str(p) for p in paths],
+            "hint": (
+                "先看人：球员聚在哪、谁在踢球。再给 2–3 个区域格子。"
+                "这一级不能 ball_label，格子只是搜索区。"
+            ),
+        }
+
+    def render_strip(
+        self,
+        packet_id: str,
+        frame_idx: Any,
+        center: Any = None,
+        size: Any = 240,
+        zoom: Any = None,
+        frames: Any = None,
+        layers: Any = None,
+        cols: Any = 6,
+        rows: Any = 6,
+    ) -> dict:
+        if not is_ready(self.work_root, packet_id):
+            job = self.job_state(packet_id)
+            return {"error": f"{packet_id} 还没准备好（{job['state']}: {job['msg']}）"}
+        prep = self.prep(packet_id)
+        sess = self.load_session(packet_id)
+        meta = self._meta_dict(packet_id, sess)
+        try:
+            fi = int(frame_idx)
+            win = float(size if size is not None else 240)
+        except (TypeError, ValueError):
+            return {"error": "frame_idx / size 非法"}
+        ctr, src = self._resolve_center(prep, packet_id, sess, meta, fi, center)
+        if ctr is None:
+            return {"error": "算不出中心，请给 center=[x,y]"}
+        step = int(meta.get("step") or 3)
+        if frames:
+            fs = [int(x) for x in frames]
+        else:
+            fs = [fi + k * step for k in range(-2, 3)]
+        ly = tuple(layers) if layers else ("raw", "enh")
+        view = V.make_frame_strip(prep, fs, ctr, size=win, cols=int(cols or 6),
+                                  rows=int(rows or 6), layers=ly, now=fi)
+        view_id = self._view_id("strip", fi, ["st", fs, list(ly), round(win, 1),
+                                             round(ctr[0], 1), round(ctr[1], 1)])
+        path = self._write_png(packet_id, view_id, 0, view.image)
+        ref = ViewRef(
+            view_id=view_id, packet_id=packet_id, frame_idx=fi, mode="strip",
+            view=view, paths=[path], center=ctr, size=win, center_source=src, panes=list(ly),
+        )
+        self._register(ref)
+        return {
+            "view_id": view_id,
+            "packet_id": packet_id,
+            "frame_idx": fi,
+            "mode": "strip",
+            "frames": fs,
+            "center": [round(ctr[0], 1), round(ctr[1], 1)],
+            "center_source": src,
+            "size": win,
+            "cols": view.cols,
+            "rows": view.rows,
+            "letters": view.letters(),
+            "cell_w_px": round(view.cell_w, 1),
+            "cell_h_px": round(view.cell_h, 1),
+            "image_paths": [str(path)],
+            "hint": (
+                "同一窗连续多帧，共用格子。先看人的动作再提名 0–3 个格子。"
+                "球可以是静止的。用 ball_nominate 写入，可多个可空。"
+            ),
+        }
+
+    def nominate(
+        self,
+        packet_id: str,
+        frame_idx: Any,
+        view_id: str = "",
+        cells: Any = None,
+    ) -> dict:
+        """提名候选。返回每个点的本地 verify 明细。"""
+        from client import verify as Vv
+
+        if not is_ready(self.work_root, packet_id):
+            return {"error": f"{packet_id} 还没准备好"}
+        try:
+            fi = int(frame_idx)
+        except (TypeError, ValueError):
+            return {"error": f"frame_idx 非法: {frame_idx!r}"}
+        prep = self.prep(packet_id)
+        sess = self.load_session(packet_id)
+        meta = self._meta_dict(packet_id, sess)
+        items = cells if isinstance(cells, list) else []
+        ref = self._lookup_view(view_id) if view_id else None
+        hist = self._anchors(packet_id, sess, meta)
+        out: List[dict] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            cell = str(it.get("cell") or "").strip()
+            xy = None
+            if ref is not None and cell:
+                xy = ref.view.cell_center(cell)
+            elif it.get("roi_xy"):
+                xy = _xy(it.get("roi_xy"))
+            if xy is None:
+                out.append({"cell": cell or None, "error": "格子号对不上这张图"})
+                continue
+            ev = Vv.judge(prep, fi, xy[0], xy[1], history=hist, step=meta.get("step"))
+            rec = {
+                "cell": cell or None,
+                "roi_x": round(xy[0], 2),
+                "roi_y": round(xy[1], 2),
+                "conf": float(it.get("conf") or 0.5),
+                "note": str(it.get("note") or ""),
+                "verify": ev.as_dict(),
+            }
+            out.append(rec)
+        store = self._load_cands(packet_id)
+        store[str(fi)] = [c for c in out if "error" not in c]
+        self._save_cands(packet_id, store)
+        return {
+            "ok": True,
+            "packet_id": packet_id,
+            "frame_idx": fi,
+            "candidates": out,
+            "n": len(store[str(fi)]),
+            "hint": "verify.score 低的点不要当答案。下一帧继续 strip，或 ball_fit 看整条轨迹。",
+        }
+
+    def fit(self, packet_id: str) -> dict:
+        """本地轨迹拟合：每帧取 verify 最高的候选，走 track.process。"""
+        if not is_ready(self.work_root, packet_id):
+            return {"error": f"{packet_id} 还没准备好"}
+        sess = self.load_session(packet_id)
+        meta = self._meta_dict(packet_id, sess)
+        store = self._load_cands(packet_id)
+        obs: List[T.Obs] = []
+        for fi in self._progress(packet_id, sess, meta)["targets"]:
+            cands = store.get(str(int(fi))) or []
+            if not cands:
+                obs.append(T.Obs(frame_idx=int(fi), x=None, y=None, conf=0.0, visible=True))
+                continue
+            best = max(cands, key=lambda c: float((c.get("verify") or {}).get("score") or 0) * float(c.get("conf") or 0.5))
+            obs.append(T.Obs(
+                frame_idx=int(fi), x=float(best["roi_x"]), y=float(best["roi_y"]),
+                conf=float(best.get("conf") or 0.5) * float((best.get("verify") or {}).get("score") or 1),
+                visible=True, stages=["nominate"],
+            ))
+        pts, st = T.process(obs)
+        resid: List[dict] = []
+        for p in pts:
+            if p.x is None or p.interp:
+                continue
+            # 残差：相对前后邻居弦的偏离
+            resid.append({"frame_idx": p.frame_idx, "conf": round(p.conf, 3), "outlier": p.outlier})
+        missing = [p.frame_idx for p in pts if p.x is None]
+        return {
+            "ok": True,
+            "packet_id": packet_id,
+            "stats": st.to_dict(),
+            "n_points": sum(1 for p in pts if p.x is not None),
+            "missing": missing[:40],
+            "track": [
+                {
+                    "frame_idx": p.frame_idx,
+                    "x": None if p.x is None else round(p.x, 2),
+                    "y": None if p.y is None else round(p.y, 2),
+                    "interp": p.interp,
+                    "outlier": p.outlier,
+                    "conf": round(p.conf, 3),
+                }
+                for p in pts
+            ],
+            "hint": "残差大 / missing 的段用 ball_strip 补提名。过得去就 ball_follow 复核再 ball_commit。",
+        }
+
+    def follow(self, packet_id: str, track: Any = None) -> dict:
+        if not is_ready(self.work_root, packet_id):
+            return {"error": f"{packet_id} 还没准备好"}
+        prep = self.prep(packet_id)
+        rows = track
+        if not rows:
+            fit = self.fit(packet_id)
+            rows = [r for r in fit.get("track") or [] if r.get("x") is not None][::3]
+        pts = []
+        for r in rows or []:
+            if isinstance(r, dict) and r.get("x") is not None:
+                pts.append((int(r["frame_idx"]), float(r["x"]), float(r["y"])))
+        img = V.make_follow_strip(prep, pts)
+        view_id = self._view_id("follow", 0, ["fl", len(pts)])
+        path = self._write_png(packet_id, view_id, 0, img)
+        dummy = V.GridView(image=img, cols=1, rows=1, origin=(0, 0), cell_w=1, cell_h=1,
+                           kind="follow", frame_idx=-1, extent=(0, 0, 1, 1))
+        self._register(ViewRef(view_id=view_id, packet_id=packet_id, frame_idx=-1,
+                               mode="follow", view=dummy, paths=[path]))
+        return {
+            "view_id": view_id,
+            "packet_id": packet_id,
+            "n": len(pts),
+            "image_paths": [str(path)],
+            "selectable": False,
+            "hint": "十字应钉在球上并跟着人的动作走。整段不对就 ball_nominate 重来，不要 commit。",
+        }
+
+    def commit(self, packet_id: str, frames: Any = None, track: Any = None) -> dict:
+        """把拟合轨迹写入 labels。未过 verify 门的帧拒绝并说明原因。"""
+        from client import verify as Vv
+
+        if not is_ready(self.work_root, packet_id):
+            return {"error": f"{packet_id} 还没准备好"}
+        sess = self.load_session(packet_id)
+        if sess.get("done"):
+            return {"error": f"{packet_id} 已经提交或释放过了"}
+        prep = self.prep(packet_id)
+        meta = self._meta_dict(packet_id, sess)
+        if track is None:
+            track = (self.fit(packet_id).get("track") or [])
+        want = None
+        if frames:
+            want = {int(x) for x in frames}
+        hist: List[Tuple[int, float, float]] = []
+        accepted, rejected = [], []
+        labels = self.labels_dict(packet_id)
+        for r in track:
+            if not isinstance(r, dict) or r.get("x") is None:
+                continue
+            fi = int(r["frame_idx"])
+            if want is not None and fi not in want:
+                continue
+            if r.get("interp"):
+                rejected.append({"frame_idx": fi, "why": "插值点不能当提交答案"})
+                continue
+            ev = Vv.judge(prep, fi, float(r["x"]), float(r["y"]), history=hist, step=meta.get("step"))
+            if ev.score < 0.6 or ev.zone == "out":
+                rejected.append({"frame_idx": fi, "why": ev.reasons or [f"verify={ev.score:.2f}"],
+                                 "verify": ev.as_dict()})
+                continue
+            px, py = prep.to_pano(float(r["x"]), float(r["y"]))
+            rec = {
+                "frame_idx": fi, "visible": True, "pano_x": round(px, 2), "pano_y": round(py, 2),
+                "occluded": False, "blurred": False, "source": "agent",
+            }
+            labels[str(fi)] = rec
+            hist.append((fi, float(r["x"]), float(r["y"])))
+            accepted.append(fi)
+        self.write_labels(packet_id, labels)
+        return {
+            "ok": True,
+            "packet_id": packet_id,
+            "n_accepted": len(accepted),
+            "n_rejected": len(rejected),
+            "accepted": accepted,
+            "rejected": rejected[:30],
+            "hint": "被拒的帧不要硬写。整包过门后再 ball_submit（走审核，不再免审入库）。",
+        }
+
+    def absent(self, packet_id: str, frames: Any) -> dict:
+        if not frames:
+            return {"error": "frames 不能空"}
+        sess = self.load_session(packet_id)
+        if sess.get("done"):
+            return {"error": f"{packet_id} 已经提交或释放过了"}
+        labels = self.labels_dict(packet_id)
+        wrote = []
+        for fi in frames:
+            rec = {
+                "frame_idx": int(fi), "visible": False,
+                "pano_x": None, "pano_y": None,
+                "occluded": False, "blurred": False, "source": "agent",
+            }
+            labels[str(int(fi))] = rec
+            wrote.append(int(fi))
+        self.write_labels(packet_id, labels)
+        return {"ok": True, "packet_id": packet_id, "frames": wrote}
+
+    def render_video(
+        self,
+        packet_id: str,
+        frames: Any = None,
+        fps: float = 1.0,
+        layers: str = "raw",
+        x0: Any = None,
+        y0: Any = None,
+        w: Any = None,
+        h: Any = None,
+    ) -> dict:
+        """按目标帧重编 1 fps 视频，给 MiniMax video_url 用。"""
+        from producer.derive import encode_indexed_clip
+
+        if not is_ready(self.work_root, packet_id):
+            return {"error": f"{packet_id} 还没准备好"}
+        prep = self.prep(packet_id)
+        sess = self.load_session(packet_id)
+        meta = self._meta_dict(packet_id, sess)
+        targets = [int(x) for x in (frames or meta.get("targets") or [])]
+        if not targets:
+            return {"error": "没有帧"}
+        clip = workspace(self.work_root, packet_id) / "clip.mp4"
+        if not clip.exists():
+            return {"error": f"找不到 {clip}"}
+        ids = []
+        for fi in targets:
+            try:
+                ids.append(int(prep.meta.clip_index(fi)))
+            except Exception:
+                continue
+        dest = self._views_dir(packet_id) / f"indexed_{layers}_{int(fps)}fps.mp4"
+        crop = None
+        if None not in (x0, y0, w, h):
+            crop = (int(x0), int(y0), int(w), int(h))
+            dest = self._views_dir(packet_id) / (
+                f"indexed_{layers}_{int(x0)}_{int(y0)}_{int(w)}x{int(h)}_{int(fps)}fps.mp4"
+            )
+        try:
+            encode_indexed_clip(clip, dest, ids, fps=float(fps), crop=crop)
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"编码失败: {type(e).__name__}: {e}"}
+        return {
+            "ok": True,
+            "packet_id": packet_id,
+            "path": str(dest),
+            "n_frames": len(ids),
+            "fps": float(fps),
+            "crop": list(crop) if crop else None,
+            "hint": "第 t 秒 = 第 t 个目标帧。公网可用 thumb URL；本地大文件走 Files API。",
+        }
+
+    def _lookup_view(self, view_id: str) -> Optional[ViewRef]:
+        with self._view_lock:
+            hit = self._views.get(view_id)
+        if hit:
+            return hit
+        # 进程重启后从磁盘几何重建
+        for p in self.work_root.glob(f"*/views/{view_id}.json"):
+            d = self._read_json(p)
+            if not d.get("geom"):
+                continue
+            ref = ViewRef(
+                view_id=view_id, packet_id=str(d.get("packet_id") or p.parent.parent.name),
+                frame_idx=int(d.get("frame_idx") or -1), mode=str(d.get("mode") or "crop"),
+                view=_view_from_geom(d["geom"]),
+                paths=[Path(x) for x in (d.get("paths") or [])],
+            )
+            with self._view_lock:
+                self._views[view_id] = ref
+            return ref
+        return None
 
     # ------------------------------------------------------------ 出图
 
@@ -1140,9 +1605,10 @@ class AgentSession:
     # ------------------------------------------------------------ 收口
 
     def submit(self, packet_id: str, force: bool = False) -> dict:
-        """`build_result` + 审核包 + `submit(source="human")`。缺目标帧默认拒绝。
+        """`build_result` + `submit(source="ai")` 进审核队列。
 
-        仍直接写 `gt`（免等审核员），但审核页可以再打开打回。审核包拼失败不挡提交。
+        agent 通道不再免审入库。可见点还要过本地 verify 门（gate=0.6）；
+        过不了的帧默认拒绝整包，force=true 才放行。
         """
         sess = self.load_session(packet_id)
         if not sess:
@@ -1169,22 +1635,31 @@ class AgentSession:
         if n_vis == 0 and not force:
             return {
                 "error": (
-                    "整包 0 帧可见，拒绝免审入库（真没有球就 ball_release，"
+                    "整包 0 帧可见，拒绝提交（真没有球就 ball_release，"
                     "不要交一包全不可见的 GT）"
                 ),
                 "packet_id": packet_id,
                 "n_visible": 0,
                 "n_labeled": len(labels),
             }
+        gated = self._gate_labels(prep, labels, meta)
+        if gated["n_fail"] and not force:
+            return {
+                "error": f"{gated['n_fail']} 帧没过本地核验门，拒绝提交（force=true 才放行）",
+                "packet_id": packet_id,
+                "n_fail": gated["n_fail"],
+                "failed": gated["failed"][:20],
+            }
         worker = sess.get("worker") or self.worker or "agent"
         started = float(sess.get("started_at") or 0.0)
         elapsed = round(time.time() - started, 2) if started else None
         result = build_result(prep.meta, worker, labels, {"elapsed_sec": elapsed})
-        result["source"] = "human"
+        result["source"] = "ai"
+        result["workflow"] = "mcp-agent"
         try:
             resp = self.api.submit(
                 result, None,
-                source="human",
+                source="ai",
                 lease_id=sess.get("lease_id"),
                 worker=worker,
             )
@@ -1203,8 +1678,35 @@ class AgentSession:
             "elapsed_sec": elapsed,
             "submission_id": (resp or {}).get("submission_id"),
             "has_bundle": False,
-            "message": f"已提交（{len(labels)} 帧，source=human 入库）",
+            "message": f"已提交（{len(labels)} 帧，source=ai 进审核，不再免审入库）",
+            "source": "ai",
         }
+
+    def _gate_labels(self, prep, labels: Dict[str, dict], meta: dict) -> dict:
+        from client import verify as Vv
+
+        hist: List[Tuple[int, float, float]] = []
+        failed = []
+        step = meta.get("step")
+        for key in sorted(labels, key=lambda s: int(s)):
+            r = labels[key]
+            if not r.get("visible") or r.get("pano_x") is None:
+                continue
+            try:
+                rx, ry = prep.to_roi(float(r["pano_x"]), float(r["pano_y"]))
+                ev = Vv.judge(prep, int(r["frame_idx"]), rx, ry, history=hist, step=step)
+            except Exception as e:  # noqa: BLE001
+                failed.append({"frame_idx": r.get("frame_idx"), "why": str(e)})
+                continue
+            if ev.score < 0.6 or ev.zone == "out":
+                failed.append({
+                    "frame_idx": r.get("frame_idx"),
+                    "score": round(ev.score, 3),
+                    "why": ev.reasons,
+                })
+                continue
+            hist.append((int(r["frame_idx"]), rx, ry))
+        return {"n_fail": len(failed), "failed": failed}
 
     def release(self, packet_id: str, reason: str = "released") -> dict:
         """放弃这一包换下一个。labels.json 留着，下次领到同一包能接着用。"""

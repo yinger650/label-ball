@@ -13,19 +13,25 @@ Server：`client/mcp_server.py`，标准库手写 stdio JSON-RPC 2.0（**不装 
 | 格子 → 坐标 | `GridView.cell_center` → `PreparedPacket.to_pano`（唯一权威通道） |
 | 会话落盘 / 心跳 | 照搬 `client/manual.py` 的 `session.json` / `labels.json` / 心跳线程 |
 
-## 九个工具
+## 工具
+
+保留：`ball_lease` / `ball_status` / `ball_frames` / `ball_view` / `ball_view_image` / `ball_label` / `ball_submit` / `ball_release` / `ball_scan`。
+
+v3 新增（优先用这些）：
 
 | 工具 | 干什么 |
 |---|---|
-| `ball_lease` | 领包，后台起下载解码 + 租约心跳 |
-| `ball_status` | 轮询准备进度、已标帧数、下一个未标帧 |
-| `ball_frames` | 目标帧清单 + 已标记录 + 下一个未标帧 |
-| `ball_scan` | 看整包 Scan 图（时间彩色或灰度最大投影），冷启动先读轨迹再挑锚点 |
-| `ball_view` | 出图，返回 `image_paths[]` + `view_id` + 网格元数据（global 是 3 张） |
-| `ball_view_image` | 同一 `view_id` 的一张图以 MCP 内联 `image`（base64）返回；`index` 选第几张 |
-| `ball_label` | 写 `labels.json`，返回换算出的 pano 坐标；`clear=true` 删这一帧 |
-| `ball_submit` | `build_result` + `submit(source="human")`（不再打 sprite） |
-| `ball_release` | 放弃换包 |
+| `ball_plan` | 每帧状态 + `query_frames` + 下一步建议 |
+| `ball_overview` | 全景三段 1:1 raw，粗格子，只看人 |
+| `ball_scan` | `scan_time` 彩图 / `scan_dog` |
+| `ball_strip` | 同窗多帧横排，默认 240 px、6×6 |
+| `ball_nominate` | 提名候选，返回本地 verify 明细 |
+| `ball_fit` | 本地轨迹拟合，零调用 |
+| `ball_follow` | 轨迹条带复核 |
+| `ball_commit` | 过 verify 门才写入 labels；插值点拒绝 |
+| `ball_absent` | 若干帧标不可见 |
+| `ball_video` | 目标帧重编 N fps 视频（第 t 秒 = 第 t 个目标帧） |
+| `ball_submit` | `source=ai` 进审核，必须过本地闸门 |
 
 ---
 
@@ -48,7 +54,7 @@ Server：`client/mcp_server.py`，标准库手写 stdio JSON-RPC 2.0（**不装 
 
 产包端生成的整包 Scan 图，缩到模型友好尺寸并叠粗网格。`kind="time"` 是时间彩色（早=蓝、晚=红），一眼看出轨迹走向；`kind="dog"` 是灰度时间最大投影。
 
-格子只用来描述位置，**不能**拿去 `ball_label`。冷启动先看这张，再 `ball_frames` 挑 2 个锚点帧，然后 crop `480→80→45`。
+格子只用来描述位置，**不能**拿去 `ball_label`。冷启动先看这张找轨迹带，再 `ball_strip`。
 
 旧 zip 包还没有 scan 文件时返回 error。
 
@@ -64,9 +70,9 @@ Server：`client/mcp_server.py`，标准库手写 stdio JSON-RPC 2.0（**不装 
 |---|---|
 | `mode` | `"global"` = ROI 横切 3 段、1:1 不缩小、raw+enh 竖叠（`make_global_strips`）；`"crop"` = 以 `center` 为心裁一块正方形放大（`make_crop_view`）；`"time_grid"` = 同一小块画面的连续 9 帧拼 3×3（`make_time_grid_view`），**没有格子**。没有 `full` / `montage`。 |
 | `center` | `crop` / `time_grid` 的窗中心，**ROI 局部像素** `[x, y]`。不给就按已标点外推，再退到最近可见点，再退到 ROI 中心（返回里的 `center_source` 会说明用了哪条）。`global` 忽略。 |
-| `size` | 窗口边长，ROI 像素。`crop` 默认 `480`，逐级用 `480` / `80` / `45`；`time_grid` 默认 `160`。`global` 忽略。 |
+| `size` | 窗口边长，ROI 像素。主力 **240–480**（装得下人）。`crop` 默认 `480`；`time_grid` 默认 **240**（`views.TIME_GRID_SIZE`）。`global` 忽略。 |
 | `pane` | 看哪几张图。`both`（默认）= 原图+滤波图；`scan` = 彩色时间扫描图+原图；`trail` = 时间最大投影+滤波图；`raw` / `enh` = 只看一张。`global` 忽略。 |
-| `cols` / `rows` | 网格。`crop` 默认 `8×8`，`global` 默认 `9×3`（三段各 3 列）。skill 建议三级配 `6×6` / `8×8` / `9×9`。`time_grid` 忽略（它没有格子）。 |
+| `cols` / `rows` | 网格。`ball_view` crop 默认 `8×8`；`ball_strip` 默认 **6×6**；`global` 默认 `9×3`。`time_grid` 忽略（它没有格子）。 |
 
 返回 `view_id`、`image_paths[]`（本机 PNG，`{work}/{packet_id}/views/<view_id>_<index>.png`）、`images[]`（每张的 `index` / `path` / `title` / `letters` / `extent`）、以及网格元数据：`cols` / `rows` / 列字母 / 每格多少 ROI 像素 / `extent`。
 
@@ -107,11 +113,37 @@ Server：`client/mcp_server.py`，标准库手写 stdio JSON-RPC 2.0（**不装 
 
 ROI 可以跨 ERP 接缝，`pano_x = (roi[0] + local_x) % pano_w` 已在 `prep.roi_to_pano` 里处理，不要自己取模。
 
+### `ball_plan(packet_id)`
+
+返回每帧 `empty` / `nominated` / `labeled` / `absent`、`query_frames`（事件驱动采样后该问的帧）、球场边界、`next` 建议。
+
+### `ball_overview(packet_id, frame_idx?)`
+
+全景三段 1:1 raw。格子只是搜索区，不能 `ball_label`。
+
+### `ball_strip(packet_id, frame_idx, center?, size=240, frames?, layers?, cols=6, rows=6)`
+
+同一窗连续多帧横排。先看人再提名。球可以静止。
+
+### `ball_nominate(packet_id, frame_idx, view_id?, cells[{cell, conf, note}])`
+
+写入 `candidates.json`，返回每个点的 `verify`（zone / dog / rgb / kine / score）。可空。
+
+### `ball_fit(packet_id)` / `ball_follow(packet_id)` / `ball_commit(packet_id, frames?, track?)`
+
+拟合 → 复核图 → 过门写入。插值点和 `verify.score < 0.6` / 出场的帧拒绝。
+
+### `ball_absent(packet_id, frames)`
+
+若干帧 `visible=false`。
+
+### `ball_video(packet_id, frames?, fps=1, x0?, y0?, w?, h?)`
+
+按目标帧重编视频。第 t 秒 = 第 t 个目标帧。大文件走 Files API（`mm_file://`）。
+
 ### `ball_submit(packet_id, force?)`
 
-`build_result` + `submit(source="human")`，直接入库（不再打 sprite）。审核页「已入库」可再打开打回（打回从 GT 删帧）。
-
-目标帧没标满时默认拒绝并返回 `missing`。`force=true` 强制提交 —— 覆盖率不足会被质检复核，别当默认动作。
+`build_result` + `submit(source="ai")` **进审核队列**，不再免审入库。可见点还要过本地 verify 门（gate=0.6）；过不了默认拒绝整包。目标帧没标满也拒绝。`force=true` 才放行。
 
 ### `ball_release(packet_id, reason)`
 

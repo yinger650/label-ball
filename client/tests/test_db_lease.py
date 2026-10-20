@@ -95,7 +95,83 @@ def test_requeue_need_human_to_available():
         c.close()
 
 
+def _sub(c, pid, worker, source, state):
+    cur = c.execute(
+        "INSERT INTO submissions(packet_id, worker, source, labels_json, n_targets, "
+        "n_labeled, state, created_at) VALUES(?,?,?,?,?,?,?,?)",
+        (pid, worker, source, "[]", 3, 3, state, db.now()),
+    )
+    c.commit()
+    return int(cur.lastrowid)
+
+
+def test_status_recall_and_delete():
+    with tempfile.TemporaryDirectory() as td:
+        c = db.connect(Path(td) / "t.sqlite3")
+        db.migrate(c)
+        _pkt(c, "fresh")
+        _pkt(c, "busy")
+        _pkt(c, "waiting", state="submitted")
+        _pkt(c, "done", state="accepted")
+        _pkt(c, "part", state="need_human")
+        c.execute(
+            "UPDATE packets SET need_frames_json=? WHERE packet_id=?",
+            (db.jdump([2, 3]), "part"),
+        )
+        c.execute("UPDATE packets SET produced_at=? WHERE packet_id=?", (10, "fresh"))
+        c.execute("UPDATE packets SET produced_at=? WHERE packet_id=?", (50, "done"))
+        c.commit()
+
+        busy = db.one(c, "SELECT * FROM packets WHERE packet_id=?", ("busy",))
+        db.open_lease(c, busy, "alice", "human")
+        _sub(c, "waiting", "bob", "ai", "pending")
+        sid = _sub(c, "done", "carol", "ai", "accepted")
+        part_sid = _sub(c, "part", "carol", "ai", "partial")
+        t = db.now()
+        c.execute(
+            "INSERT INTO reviews(submission_id, reviewer, decision, created_at) VALUES(?,?,?,?)",
+            (sid, "dave", "accept", t),
+        )
+        c.execute(
+            "INSERT INTO reviews(submission_id, reviewer, decision, created_at) VALUES(?,?,?,?)",
+            (part_sid, "eve", "partial", t),
+        )
+        c.execute(
+            "INSERT INTO gt(packet_id, frame_idx, visible, source, worker, updated_at) "
+            "VALUES(?,?,?,?,?,?)",
+            ("done", 1, 1, "ai", "carol", t),
+        )
+        c.commit()
+
+        listed = {p["packet_id"]: p for p in db.list_packets(c, order="produced")["packets"]}
+        assert listed["busy"]["status_text"] == "被 alice 领取标注中（人工）", listed["busy"]
+        assert listed["busy"]["lease_worker"] == "alice"
+        assert listed["waiting"]["status_text"] == "bob 标注完，待审核"
+        assert listed["done"]["status_text"] == "dave 已完成审核入库"
+        assert listed["part"]["status_text"] == "eve 部分通过，剩余 2 帧待重标"
+        assert listed["fresh"]["status_text"] == "待领取"
+        order = [p["packet_id"] for p in db.list_packets(c, order="produced")["packets"]]
+        assert order.index("done") < order.index("fresh"), order
+
+        out = db.recall_packets(c, ["busy", "fresh"])
+        assert out["moved"] == ["busy"], out
+        assert any(s["packet_id"] == "fresh" for s in out["skipped"])
+        row = db.one(c, "SELECT state FROM packets WHERE packet_id=?", ("busy",))
+        assert row["state"] == "available"
+        lease = db.one(c, "SELECT released_reason FROM leases WHERE packet_id=?", ("busy",))
+        assert lease["released_reason"] == "recalled"
+
+        gone = db.delete_packets(c, ["done", "nope"])
+        assert gone["deleted"] == ["done"], gone
+        assert db.one(c, "SELECT packet_id FROM packets WHERE packet_id=?", ("done",)) is None
+        assert int(db.scalar(c, "SELECT COUNT(*) FROM gt WHERE packet_id=?", ("done",))) == 0
+        assert int(db.scalar(c, "SELECT COUNT(*) FROM submissions WHERE packet_id=?", ("done",))) == 0
+        assert int(db.scalar(c, "SELECT COUNT(*) FROM reviews WHERE submission_id=?", (sid,))) == 0
+        c.close()
+
+
 if __name__ == "__main__":
     test_want_packet_and_seed_priority()
     test_requeue_need_human_to_available()
+    test_status_recall_and_delete()
     print("ok db_lease")

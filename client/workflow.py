@@ -231,6 +231,11 @@ class Workflow:
         # 误差 105–128 px），而没有任何一级负责重新找球。
         self.lost_after = int(d.get("lost_after", 2))
         self.cold_after = int(d.get("cold_after", 6))
+        # 事件驱动采样：有 ≥3 个已定点之后，平直段隔 stride 帧再问，加速度大的
+        # 邻域仍逐帧问。False 时行为与 v2 完全一样。
+        self.event_sample = bool(d.get("event_sample", False))
+        self.event_stride = int(d.get("event_stride", 2))
+        self.event_acc = float(d.get("event_acc", 25.0))
         if self.review:
             # propose + 三级 refine 各再问一次，原来的 5 次上限会把 refine3 掐掉。
             self.max_calls_per_frame = max(self.max_calls_per_frame, 10)
@@ -854,8 +859,10 @@ class Workflow:
         最弱的一环，能绕开就绕开。
         """
         from client.track import predict_next
+        from client import sample as S
 
         targets = list(frames if frames is not None else prep.targets)
+        step = int(getattr(prep.meta, "step", 1) or 1)
         done: List[FrameRun] = []
         budget = max_calls if max_calls is not None else 10**9
         used = 0
@@ -869,6 +876,20 @@ class Workflow:
         for fi in targets:
             if used >= budget:
                 done.append(FrameRun(frame_idx=fi, visible=False))
+                continue
+            if (
+                self.event_sample
+                and len(chain) >= 3
+                and S.skippable(
+                    fi, targets, chain,
+                    stride=self.event_stride, acc_thr=self.event_acc, step=step,
+                )
+            ):
+                # 平直段留给 second_pass / track 插值，不花模型调用
+                done.append(FrameRun(frame_idx=fi, visible=False, drop_reason="event_skip"))
+                lost += 1
+                if on_frame:
+                    on_frame(done[-1])
                 continue
             if lost >= self.cold_after:
                 # 锚也不可信了，彻底退回冷启动重新找球

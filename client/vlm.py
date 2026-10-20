@@ -304,14 +304,43 @@ class Provider:
             part["image_url"]["detail"] = self.cfg.detail
         return part
 
-    def _messages(self, prompt: str, images: Sequence[bytes], system: str, fmt: str) -> List[dict]:
-        content: List[dict] = [self._image_part(b, fmt) for b in images]
+    def _video_part(self, spec: dict) -> dict:
+        """MiniMax-M3 的 video_url 块。url 可以是 https / data:video/mp4;base64 / mm_file://。"""
+        vu: Dict[str, Any] = {"url": spec["url"]}
+        if spec.get("detail") or self.cfg.detail:
+            vu["detail"] = spec.get("detail") or self.cfg.detail
+        if spec.get("fps") is not None:
+            vu["fps"] = float(spec["fps"])
+        if spec.get("max_long_side_pixel") is not None:
+            vu["max_long_side_pixel"] = int(spec["max_long_side_pixel"])
+        return {"type": "video_url", "video_url": vu}
+
+    def _messages(
+        self,
+        prompt: str,
+        images: Sequence[bytes],
+        system: str,
+        fmt: str,
+        videos: Sequence[dict] = (),
+    ) -> List[dict]:
+        content: List[dict] = [self._video_part(v) for v in videos]
+        content.extend(self._image_part(b, fmt) for b in images)
         content.append({"type": "text", "text": prompt})
         msgs: List[dict] = []
         if system:
             msgs.append({"role": "system", "content": system})
         msgs.append({"role": "user", "content": content})
         return msgs
+
+    def upload_file(self, path: Path, purpose: str = "video") -> str:
+        """走 Files API，返回 `mm_file://{id}`。URL/base64 视频上限 50 MB 时用这个。"""
+        p = Path(path)
+        with p.open("rb") as f:
+            up = self.client.files.create(file=(p.name, f, "video/mp4"), purpose=purpose)
+        fid = getattr(up, "id", None) or (up.get("id") if isinstance(up, dict) else None)
+        if not fid:
+            raise RuntimeError(f"Files API 没返回 id: {up}")
+        return f"mm_file://{fid}"
 
     def _body(self) -> dict:
         return {k: v for k, v in (self.cfg.extra_body or {}).items() if k not in self._bad_params}
@@ -327,28 +356,37 @@ class Provider:
         image_format: Optional[str] = None,
         use_cache: bool = True,
         retries: int = 2,
+        videos: Sequence[dict] = (),
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> VlmResult:
         fmt = image_format or self.cfg.image_format
         max_tokens = max_tokens or self.cfg.max_tokens
-        params = {"t": self.cfg.temperature, "mt": max_tokens, "eb": self.cfg.extra_body, "d": self.cfg.detail}
+        body_cfg = extra_body if extra_body is not None else self.cfg.extra_body
+        params = {
+            "t": self.cfg.temperature, "mt": max_tokens, "eb": body_cfg,
+            "d": self.cfg.detail, "vid": [v.get("url", "")[:80] for v in videos],
+            "vfps": [v.get("fps") for v in videos],
+            "vside": [v.get("max_long_side_pixel") for v in videos],
+        }
         ck = ResponseCache.key(images, prompt, system, f"{self.cfg.name}/{self.cfg.model}", params)
         if use_cache and self.cache:
             hit = self.cache.get(ck)
             if hit:
                 return hit
 
-        msgs = self._messages(prompt, images, system, fmt)
+        msgs = self._messages(prompt, images, system, fmt, videos=videos)
         last = ""
         for attempt in range(max(1, retries)):
             try:
                 with self.limiter:
                     t0 = time.monotonic()
+                    used_body = extra_body if extra_body is not None else self._body()
                     resp = self.client.chat.completions.create(
                         model=self.cfg.model,
                         messages=msgs,
                         temperature=self.cfg.temperature,
                         max_tokens=max_tokens,
-                        extra_body=self._body() or None,
+                        extra_body=used_body or None,
                     )
                 dt = time.monotonic() - t0
                 ch = resp.choices[0] if resp.choices else None
@@ -482,6 +520,19 @@ class VlmPool:
     def available(self) -> List[str]:
         return [n for n, c in self.cfgs.items() if c.enabled and c.has_key]
 
+    def pin(self, name: str) -> None:
+        """把所有角色链收成这一家，禁止降级。对比实验用。"""
+        if name not in self.cfgs:
+            raise ValueError(f"未知供应商 {name}")
+        cfg = self.cfgs[name]
+        if not cfg.enabled:
+            raise RuntimeError(f"{name} 已停用")
+        if not cfg.has_key:
+            raise RuntimeError(f"{name} 没有 key（环境变量 {cfg.api_key_env}）")
+        self.roles = {role: [name] for role in (self.roles or {"primary": []})}
+        if "primary" not in self.roles:
+            self.roles["primary"] = [name]
+
     def _chain_or_named(self, role: str, provider: Optional[str] = None) -> Tuple[List[str], str]:
         """指定供应商时不走角色降级，方便对比「这一家到底选了哪格」。"""
         if provider:
@@ -500,13 +551,17 @@ class VlmPool:
 
     def ask(self, role: str, prompt: str, images: Sequence[bytes] = (), system: str = "",
             max_tokens: Optional[int] = None, use_cache: bool = True,
-            provider: Optional[str] = None) -> VlmResult:
+            provider: Optional[str] = None, videos: Sequence[dict] = (),
+            extra_body: Optional[Dict[str, Any]] = None) -> VlmResult:
         chain, err = self._chain_or_named(role, provider)
         if not chain:
             return VlmResult(ok=False, error=err)
         last = VlmResult(ok=False)
         for name in chain:
-            r = self.provider(name).call(prompt, images, system, max_tokens, use_cache=use_cache)
+            r = self.provider(name).call(
+                prompt, images, system, max_tokens, use_cache=use_cache, videos=videos,
+                extra_body=extra_body,
+            )
             with self._lock:
                 self.calls += 1
                 self.cache_hits += int(r.cached)
@@ -518,7 +573,9 @@ class VlmPool:
     def ask_json(self, role: str, prompt: str, images: Sequence[bytes] = (), system: str = "",
                  schema: Optional[Dict[str, type]] = None, required: Sequence[str] = (),
                  max_tokens: Optional[int] = None, use_cache: bool = True,
-                 provider: Optional[str] = None) -> Tuple[Optional[dict], VlmResult]:
+                 provider: Optional[str] = None,
+                 videos: Sequence[dict] = (),
+                 extra_body: Optional[Dict[str, Any]] = None) -> Tuple[Optional[dict], VlmResult]:
         chain, err = self._chain_or_named(role, provider)
         if not chain:
             return None, VlmResult(ok=False, error=err)
@@ -526,7 +583,11 @@ class VlmPool:
         for name in chain:
             p = self.provider(name)
             for attempt in range(2):  # 解析失败给一次重试（第二次绕开缓存）
-                r = p.call(prompt, images, system, max_tokens, use_cache=use_cache and attempt == 0)
+                r = p.call(
+                    prompt, images, system, max_tokens,
+                    use_cache=use_cache and attempt == 0, videos=videos,
+                    extra_body=extra_body,
+                )
                 with self._lock:
                     self.calls += 1
                     self.cache_hits += int(r.cached)

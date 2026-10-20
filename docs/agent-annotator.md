@@ -1,10 +1,12 @@
 # Agent 标注员
 
-让编码 agent（Codex / Cursor / zcode / workbuddy）通过 MCP 当标注员，走人工通道 `source=human` 免审入库。和 [ai-client.md](ai-client.md) 的 VLM 主循环是**两条独立路线**：那条是仓库自己的声明式工作流按级问模型，这条是把「领包 / 出图 / 写标注 / 提交」暴露成工具，让 agent 自己决定下一步。
+让编码 agent（Codex / Cursor / zcode / workbuddy）通过 MCP 当标注员。提交走 `source=ai` **进审核队列**，不再免审入库。和 [ai-client.md](ai-client.md) 的 VLM 主循环是**两条独立路线**：那条是仓库自己的声明式工作流按级问模型，这条是把「领包 / 出图 / 提名 / 拟合 / 提交」暴露成工具。
 
 ```
-ball_lease → ball_status(等 ready) → 逐帧[ball_frames → ball_view ×3 → ball_label] → ball_submit
-             下载+解码 1–3 分钟                480 → 80 → 45，每级只答一个格子号
+ball_lease → ball_status(等 ready) → ball_plan
+  → 冷启动：ball_overview + ball_scan
+  → query_frames：ball_strip(240–480) + ball_nominate
+  → ball_fit → ball_follow → ball_commit → ball_submit(source=ai)
 ```
 
 Server：`client/mcp_server.py`（标准库 stdio JSON-RPC 2.0，**不装 `mcp` SDK** —— `requirements.txt` 是服务端和客户端共用的，公网站部署会照它装，加依赖会污染只该有 flask/waitress 的生产环境）。数据面：`client/agent_core.py`。skill：`skills/ball-label/`。
@@ -36,14 +38,22 @@ bash skills/ball-label/install.sh
 |---|---|---|
 | `ball_lease` | `worker?`, `kind="human"` | 领包，返回 `packet_id` / 目标帧数 / `roi`；**后台**起下载解码 + 租约心跳 |
 | `ball_status` | `packet_id` | 准备进度、已标帧数、下一个未标帧 |
+| `ball_plan` | `packet_id` | 每帧状态 + `query_frames` + 下一步 |
 | `ball_frames` | `packet_id` | 目标帧清单 + 已标记录 + `next_frame`；有可见点时附 `predicted.center` |
-| `ball_view` | `packet_id`, `frame_idx`, `mode?`, `center?`, `size?`, `cols?`, `rows?` | 出图，返回 `image_paths[]` + `view_id` + 网格元数据（`global` 3 张，`crop` 1 张） |
-| `ball_view_image` | `view_id`, `index?=0` | 同一 `view_id` 的一张图以 MCP 内联 `image`（base64）返回；`global` 用 0/1/2 取左/中/右 |
-| `ball_label` | `packet_id`, `frame_idx`, `view_id?`, `cell?`, `roi_xy?`, `pano_xy?`, `visible?`, `occluded?`, `blurred?`, `clear?` | 写 `labels.json`，返回换算出的 pano 坐标；`clear=true` 删这一帧 |
-| `ball_submit` | `packet_id`, `force?` | `build_result` + `submit(source="human")`，缺目标帧默认拒绝 |
+| `ball_overview` | `packet_id`, `frame_idx?` | 全景三段 1:1 raw，只看人 |
+| `ball_scan` | `packet_id`, `kind?`, `max_side?` | 整包 Scan 图（`time` 彩图 / `dog` 最大投影） |
+| `ball_strip` | `packet_id`, `frame_idx`, `center?`, `size?=240` | 同窗多帧横排，默认 6×6 |
+| `ball_nominate` | `packet_id`, `frame_idx`, `view_id?`, `cells` | 提名候选，返回本地 verify |
+| `ball_fit` / `ball_follow` / `ball_commit` | `packet_id` | 拟合 → 复核 → 过门写入 |
+| `ball_absent` | `packet_id`, `frames` | 标不可见 |
+| `ball_video` | `packet_id`, `fps?=1`, `x0?`… | 目标帧重编视频，第 t 秒 = 第 t 个目标帧 |
+| `ball_view` | `packet_id`, `frame_idx`, `mode?`, `center?`, `size?`, `cols?`, `rows?` | 旧出图通道（`global` / `crop` / `time_grid`） |
+| `ball_view_image` | `view_id`, `index?=0` | 同一 `view_id` 的一张图以 MCP 内联 `image` 返回 |
+| `ball_label` | `packet_id`, `frame_idx`, `view_id?`, `cell?`… | 写单帧标注（旁路；新流程用 nominate/commit） |
+| `ball_submit` | `packet_id`, `force?` | `build_result` + `submit(source="ai")`，过闸门，进审核 |
 | `ball_release` | `packet_id`, `reason` | 放弃换包 |
 
-`mode="global"` 是整幅 ROI 横切 3 段、1:1 不缩小、raw+enh 竖叠（`views.make_global_strips`）；`mode="crop"` 是以 `center` 为心裁一块正方形放大（`views.make_crop_view`）。坐标都是 **ROI 局部像素**。
+`ball_view`：`mode="global"` 横切 3 段 1:1；`mode="crop"` 方窗（主力 240–480 px）；`mode="time_grid"` 连续 9 帧，默认每格 **240 px**（`views.TIME_GRID_SIZE`）。`ball_strip` 默认 **6×6**；旧 crop 默认仍是 8×8。坐标都是 **ROI 局部像素**。
 
 格子号形如 `C3`。列字母**剔掉了 `I` 和 `O`**（等宽字体下和 `1` / `0` 分不清），列序是 `A B C D E F G H J K L M N P Q R S T U V W X Y Z`。`global` 三段的列字母连续（左 A–C、中 D–F、右 G–J），不是每段各自从 A 重来。
 
@@ -58,39 +68,34 @@ bash skills/ball-label/install.sh
 2  ball_status(packet_id)          # 每 20–30 s 一次，别更密
    → state="downloading" … "decoding" … "ready"
 
-3  ball_frames(packet_id)
-   → targets=[1703, 1706, …], labels={}, next_frame=1703, predicted=null
+3  ball_plan(packet_id)
+   → frames[].state=empty, query_frames=全部（冷启动）, next="cold: overview + scan"
 
-4  ball_view(packet_id, 1703, mode="global")
-   → view_id=v001, image_paths=[…/v001_0.png, …_1.png, …_2.png], cols=9, rows=3
-   看 enh 那半张图找孤立小白斑 → 假设在 D2
+4  ball_overview(packet_id) + ball_scan(packet_id, kind="time")
+   → 看人聚在哪、轨迹带朝哪
 
-5  ball_view(packet_id, 1703, mode="crop", center=[1792, 330], size=480, cols=6, rows=6)
-   → view_id=v002, cell_px=[80, 80]        → 答 C4
+5  ball_strip(packet_id, 1703, center=[1792, 330], size=240)
+   → 同一窗多帧，6×6。先看人再提名 C4
 
-6  ball_view(packet_id, 1703, mode="crop", center=[1712, 610], size=80, cols=8, rows=8)
-   → view_id=v003, cell_px=[10, 10]        → 答 E5
+6  ball_nominate(packet_id, 1703, view_id, cells=[{cell:"C4", conf:0.7}])
+   → 每点带 verify.score / zone / dog / rgb
 
-7  ball_view(packet_id, 1703, mode="crop", center=[1717, 615], size=45, cols=9, rows=9)
-   → view_id=v004, cell_px=[5, 5]          → 答 E5
+7  对 query_frames 重复 5–6（平直段隔 2 帧；踢球段逐帧）
 
-8  ball_label(packet_id, 1703, view_id="v004", cell="E5", visible=true)
-   → pano_xy=[1719.5, 617.5]
+8  ball_fit → ball_follow 复核十字是否钉在球上
 
-9  第 2 帧重复 4–8。攒够可见点之后，`ball_frames` 会给 `predicted.center`，
-   直接当下一帧 crop 的 center（不必自己算外推）。480 那级通常可以省掉，直接从 80 起。
-
-…  ball_frames 的 next_frame 变成 null
+9  ball_commit(packet_id)     # 过不了门的帧拒绝
+   ball_absent(缺的帧)        # 真看不见
 
 N  ball_submit(packet_id)
-   → ok, n_labeled=100, 入库（带审核包，可再审）
+   → ok, source=ai，进审核（不再免审入库）
 ```
 
 `ball_view` 的 `center` 每一级都用**上一级答案的格心**，不要自己另算。细化级的答案必须落在上一级答案附近（约 1 格宽 + 4 px），跳得很远说明某级看错了 —— 退回上一级重看，或者干脆 `visible=false`。
 
 ## 判断口径（和人工完全一致）
 
-口径来自 [标注员使用说明.md](../标注员使用说明.md)。提交仍立即入库，但审核员可以再打开打回，口径不能松。
+口径来自 [标注员使用说明.md](../标注员使用说明.md)。提交进审核队列，口径不能松。
 
 - **只标比赛中正在使用的那一个球。** 场边、球门后、看台的备用球一律不标。判断办法：前后拨几帧看它有没有参与比赛 —— 被踢、被传、跟着球员走的那个才是；静止不动的多半是备用球。纯几何跟踪曾经被一颗完全静止的备用球锁死过（见 [design.md](design.md)）。
 - **enh 图黑底，飞行中的球是孤立的小白斑，球员是大块白色人形。** 先在 enh 上找，再回 raw 确认。
@@ -115,7 +120,7 @@ N  ball_submit(packet_id)
 
 ## 代价，先说清楚
 
-**一包约 100 个目标帧 × 每帧 3–4 次出图 = 一包 300+ 次工具调用。** agent 走完一包会很慢、很贵，而且中间任何一次上下文截断都可能让它忘掉判断口径。
+旧的「100 帧 × 3–4 次出图 = 300+ 次调用」是 480→80→45 均摊。v3 把预算花在冷启动 + 事件段，平直段隔 2–3 帧线性插值（实测中位 3–4 px）。视频路线通了再用 `ball_video` 进一步压调用。
 
 所以：
 
@@ -125,7 +130,7 @@ N  ball_submit(packet_id)
 
 ## 已知限制
 
-- **第一版 skill 是刻意最小的，准备迭代。** `skills/ball-label/SKILL.md` 只给一个逐级放大循环 + 几条硬约束，没有分支策略、没有遮挡 / 拖影的细则、没有失败重试的决策树。先看 agent 在真包上哪里出错，再往里加，而不是先猜。
+- skill / 工具面已改成事件驱动：`ball_plan` 记进度，`ball_commit` / `ball_submit` 过本地闸门。视频阶梯见 `scripts/probe_video.py`。
 - 数据面（MCP + `agent_core`）做扎实，流程面（skill）留着改。两者版本没有绑定。
 - `occluded` / `blurred` 目前靠 agent 自觉逐帧判断，没有校验。
 - 目标帧齐全校验只看「有没有记录」，不看质量。`force=true` 能绕过 —— 覆盖率不足的包会被质检拎出来复核。

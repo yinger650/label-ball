@@ -56,6 +56,15 @@
   .hint { color:var(--dim); font-size:12px; }
   .sep { border:0; border-top:1px solid var(--line); margin:16px 0; }
   .empty { color:var(--dim); padding:22px 4px; text-align:center; font-size:13px; }
+  .sitenav { position:sticky; top:0; z-index:8; display:flex; gap:2px; padding:0 20px;
+             background:#101216; border-bottom:1px solid var(--line); }
+  .sitenav a { color:var(--dim); text-decoration:none; padding:12px 16px; font-size:14px;
+               border-bottom:2px solid transparent; }
+  .sitenav a:hover { color:var(--fg); text-decoration:none; }
+  .sitenav a.on { color:var(--fg); border-bottom-color:var(--acc); font-weight:600; }
+  button.warn { background:transparent; color:var(--warn); border:1px solid #6b5722; }
+  button.danger { background:transparent; color:var(--bad); border:1px solid #6b2b30; }
+  .status { font-size:13px; }
 
   /* 告警条：数量不定，堆在页面最顶上，颜色分级 */
   .alert { border-radius:9px; padding:10px 14px; margin-bottom:10px; font-size:13px;
@@ -97,49 +106,34 @@
 </style>
 </head>
 <body>
+<nav class="sitenav">
+  <a href="/#produce" data-tab="produce" class="on">数据包生产</a>
+  <a href="/#manage" data-tab="manage">数据包管理</a>
+  <a href="/review">数据包审核</a>
+</nav>
 <div class="wrap">
   <div class="row hd" style="align-items:flex-start">
     <div>
-      <h1>足球 GT 看板</h1>
-      <div class="sub">只读监控：包在哪一步 · AI 到底能不能用 · 采集端还活着吗。
-        人工标注在标注员本机的 <code>client/manual.py</code> 里做，本页不领包。</div>
+      <h1 id="pageTitle">数据包生产</h1>
+      <div class="sub" id="pageSub">ACP 作业，以及刚产出来的包现在标到哪一步。
+        标注在标注员本机的 <code>client/manual.py</code> 里做。</div>
     </div>
     <div class="row">
-      <a href="/review"><button class="ghost" type="button">审核队列</button></a>
       <button id="refresh" type="button">刷新</button>
       <span class="hint" id="lastAt">尚未刷新</span>
     </div>
   </div>
 
+  <div id="tab-produce">
   <div id="banner" style="margin-top:16px"></div>
 
   <div class="card">
-    <div class="stat" id="counts"></div>
-    <hr class="sep">
-    <div class="stat" id="gtStat"></div>
-    <div id="coldStart"></div>
-  </div>
-
-  <div class="card">
     <div class="row hd">
-      <div><b>吞吐</b> <span class="hint">入库 GT 帧数量级远大于其它序列，单独走右轴</span></div>
-      <div class="row" id="winBtns"></div>
-    </div>
-    <div class="legend" id="tpLegend"></div>
-    <div class="chartbox"><canvas id="tpChart"></canvas><div class="tip" id="tpTip"></div></div>
-  </div>
-
-  <div class="card">
-    <div class="row hd">
-      <div><b>审核通过率</b> <span class="hint">按模型 × 工作流。帧级通过率 = 通过帧 /（通过帧 + 打回帧）</span></div>
-    </div>
-    <div id="rateWrap"></div>
-  </div>
-
-  <div class="card">
-    <div class="row hd">
-      <div><b>采集端</b> <span class="hint">池深走左轴，生产 / 消费速率（个/小时）走右轴</span></div>
-      <span class="hint" id="poolHint"></span>
+      <div><b>ACP 任务</b> <span class="hint">池深走左轴，生产 / 消费速率（个/小时）走右轴</span></div>
+      <div class="row">
+        <div class="row" id="winBtns"></div>
+        <span class="hint" id="poolHint"></span>
+      </div>
     </div>
     <div class="legend" id="poolLegend"></div>
     <div class="chartbox"><canvas id="poolChart"></canvas><div class="tip" id="poolTip"></div></div>
@@ -150,17 +144,31 @@
 
   <div class="card">
     <div class="row hd">
-      <div><b>包列表</b> <span class="hint" id="pkHint"></span></div>
+      <div><b>最新生产的包</b> <span class="hint" id="prHint">按生产时间，后面是当前标注状态</span></div>
+      <input id="prQ" placeholder="搜索 packet_id…" style="width:260px" autocomplete="off">
+    </div>
+    <div id="prWrap"></div>
+    <div class="row" id="prPager" style="margin-top:12px;justify-content:flex-end"></div>
+  </div>
+  </div>
+
+  <div id="tab-manage" hidden>
+  <div class="card">
+    <div class="row hd">
+      <div><b>全部数据包</b> <span class="hint" id="pkHint"></span></div>
       <input id="q" placeholder="搜索 packet_id…" style="width:260px" autocomplete="off">
     </div>
     <div class="row" id="stateBtns" style="margin:12px 0 4px"></div>
-    <div class="row" id="pkBulk" style="margin:8px 0 4px;display:none">
+    <div class="row" id="pkBulk" style="margin:8px 0 4px">
       <button type="button" class="ghost sm" id="pkSelAll">全选本页</button>
+      <button type="button" class="warn sm" id="pkRecall" disabled>撤回领取</button>
+      <button type="button" class="danger sm" id="pkDelete" disabled>删除</button>
       <button type="button" class="ghost sm" id="pkRequeue" disabled>打回待标注</button>
-      <span class="hint" id="pkSelHint">勾选待修复包，可一次打回待标注池</span>
+      <span class="hint" id="pkSelHint">勾选后可以撤回标注中的包，或删除无用包</span>
     </div>
     <div id="pkWrap"></div>
     <div class="row" id="pager" style="margin-top:12px;justify-content:flex-end"></div>
+  </div>
   </div>
 </div>
 
@@ -172,9 +180,13 @@ const $ = (s) => document.querySelector(s);
 const REFRESH_MS = 15000;
 
 const S = {
+  tab: 'produce',
   hours: 24,
-  stats: null,
   prod: null,
+  prPackets: null,
+  prQ: '',
+  prOffset: 0,
+  prLimit: 50,
   packets: null,
   errors: [],          // 本轮刷新里各接口的报错，渲染成顶部红条而不是静默吞掉
   hidden: new Set(),   // 被图例点掉的序列 key
@@ -521,49 +533,7 @@ function renderLegend(elId, series) {
   }
 }
 
-/* ---------------------------------------------------------------- 顶部概览 */
-
-function renderCounts() {
-  const st = S.stats;
-  const c = (st && st.counts) || {};
-  const cells = [
-    ['available', '可领取'], ['leased', '已领取'], ['submitted', '待审'],
-    ['accepted', '已入库'], ['need_human', '待人工修补'], ['archived', '已归档'],
-  ].map(([k, label]) => {
-    const color = (STATE_MAP[k] || {}).color || 'var(--fg)';
-    return `<div><b style="color:${color}">${st ? n0(c[k]) : '—'}</b><span>${label}</span></div>`;
-  });
-  cells.push(`<div><b style="color:var(--vio)">${st ? n0(c.n_pending_review) : '—'}</b>
-              <span>待审提交</span></div>`);
-  cells.push(`<div><b>${st ? n0(st.n_open_leases) : '—'}</b><span>活跃租约</span></div>`);
-  cells.push(`<div><b>${st ? n0(c.n_total) : '—'}</b><span>包总数</span></div>`);
-  $('#counts').innerHTML = cells.join('');
-
-  const g = (st && st.gt) || {};
-  const tot = n0(g.n_frames);
-  const share = (v) => (tot ? ` (${Math.round(n0(v) / tot * 100)}%)` : '');
-  $('#gtStat').innerHTML = [
-    `<div><b style="color:var(--ok)">${st ? tot : '—'}</b><span>已入库 GT 帧</span></div>`,
-    `<div><b>${st ? n0(g.n_visible) : '—'}</b><span>其中可见球</span></div>`,
-    `<div><b>${st ? n0(g.n_packets) : '—'}</b><span>覆盖包数</span></div>`,
-    `<div><b style="color:var(--acc)">${st ? n0(g.n_ai) : '—'}</b>
-       <span>AI 帧</span><em>${st ? share(g.n_ai) || '—' : ''}</em></div>`,
-    `<div><b style="color:var(--warn)">${st ? n0(g.n_human) : '—'}</b>
-       <span>人工帧</span><em>${st ? share(g.n_human) || '—' : ''}</em></div>`,
-    `<div><b style="color:var(--dim)">${st ? n0(g.n_interp) : '—'}</b>
-       <span>插值帧</span><em>${st ? share(g.n_interp) || '—' : ''}</em></div>`,
-  ].join('');
-
-  // 全新库的第一眼：与其让六个 0 看起来像出了故障，不如直说下一步该干什么
-  const fresh = st && !n0(c.n_total) && !tot;
-  $('#coldStart').innerHTML = fresh
-    ? `<div class="empty" style="text-align:left;padding:16px 0 0">
-         库里还没有任何包。先让采集端跑起来（<code>submit.sh</code> 产包并
-         <code>POST /api/v2/register</code> 注册），包出现后本页所有面板会自动填上。</div>`
-    : '';
-}
-
-/* ---------------------------------------------------------------- 吞吐 */
+/* ---------------------------------------------------------------- 采集端 */
 
 function renderWindowBtns() {
   const el = $('#winBtns');
@@ -582,88 +552,13 @@ function renderWindowBtns() {
   }
 }
 
-function tpSeries() {
-  const t = (S.stats && S.stats.throughput) || {};
-  const n = Math.max(0, n0(t.buckets) || (Array.isArray(t.registered) ? t.registered.length : 0));
-  return [
-    { key: 'tp:registered', name: '注册包', color: C.acc, data: arr(t.registered, n) },
-    { key: 'tp:leased', name: '领包', color: C.vio, data: arr(t.leased, n) },
-    { key: 'tp:submitted_ai', name: 'AI 提交', color: C.ok, data: arr(t.submitted_ai, n) },
-    { key: 'tp:submitted_human', name: '人工提交', color: C.warn, data: arr(t.submitted_human, n) },
-    { key: 'tp:reviewed', name: '审核', color: C.pink, data: arr(t.reviewed, n) },
-    { key: 'tp:gt_frames', name: '入库 GT 帧（右轴）', color: C.cyan, axis: 'right',
-      dash: [4, 3], data: arr(t.gt_frames, n) },
-  ];
-}
-
-function renderThroughput() {
-  const t = (S.stats && S.stats.throughput) || {};
-  const series = tpSeries();
-  const n = series[0].data.length;
-  // 第 i 个桶的时间是桶的中点，接口只给 t0 / step_sec，得自己算
-  const t0 = isNum(t.t0) ? t.t0 : 0;
-  const step = isNum(t.step_sec) ? t.step_sec : 0;
-  const xs = new Array(n).fill(0).map((_, i) => t0 + (i + 0.5) * step);
-  renderLegend('tpLegend', series);
-  drawChart('tpChart', {
-    xs, series,
-    emptyText: S.stats ? '该时间窗内没有任何事件' : panelMsg('统计', '正在加载…'),
-  });
-}
-
-/* ---------------------------------------------------------------- 通过率 */
-
-function rateChip(v) {
-  if (!isNum(v)) return '<span class="dim">—</span>';
-  const color = v >= 0.9 ? 'var(--ok)' : v >= 0.7 ? 'var(--warn)' : 'var(--bad)';
-  const bg = v >= 0.9 ? 'rgba(74,222,128,.13)' : v >= 0.7 ? 'rgba(251,191,36,.13)' : 'rgba(248,113,113,.13)';
-  return `<span class="rate" style="color:${color};background:${bg}">${pct(v)}</span>`;
-}
-
-function renderRate() {
-  const rows = (S.stats && S.stats.review_rate) || [];
-  if (!rows.length) {
-    $('#rateWrap').innerHTML = `<div class="empty">${S.stats
-      ? '还没有 AI 提交，跑完第一批 <code>client/auto.py</code> 后这里才会有数。'
-      : panelMsg('统计', '正在加载…')}</div>`;
-    return;
-  }
-  const body = rows.map((r) => {
-    const judged = n0(r.n_judged);
-    return `<tr>
-      <td class="pid">${esc(r.model_used)}</td>
-      <td class="pid">${esc(r.workflow)}</td>
-      <td>${n0(r.n_sub)}</td>
-      <td>${judged}${n0(r.n_pending) ? ` <span class="tag">待审 ${n0(r.n_pending)}</span>` : ''}</td>
-      <td>${isNum(r.packet_pass_rate) ? pct(r.packet_pass_rate) : '<span class="dim">—</span>'}
-        <div class="hint">整包过 ${n0(r.n_pkt_accepted)} · 部分 ${n0(r.n_pkt_partial)} · 打回 ${n0(r.n_pkt_rejected)}</div></td>
-      <td>${rateChip(r.frame_pass_rate)}
-        <div class="hint">${n0(r.f_ok)} 通过 / ${n0(r.f_bad)} 打回</div></td>
-      <td>${isNum(r.mean_conf) ? r.mean_conf.toFixed(3) : '<span class="dim">—</span>'}</td>
-      <td>${isNum(r.interp_ratio) ? pct(r.interp_ratio) : '<span class="dim">—</span>'}</td>
-    </tr>`;
-  }).join('');
-  $('#rateWrap').innerHTML = `<table style="margin-top:8px"><thead><tr>
-      <th>模型</th><th>工作流</th><th>提交</th><th>已裁决</th>
-      <th>包级通过率</th><th>帧级通过率</th><th>平均置信度</th><th>插值占比</th>
-    </tr></thead><tbody>${body}</tbody></table>`;
-}
-
-/* ---------------------------------------------------------------- 采集端 */
-
 function poolOf() {
-  // producers 与 stats 都带 pool，谁新用谁；两个接口都挂了才回退到空对象
-  const a = (S.prod && S.prod.pool) || null;
-  const b = (S.stats && S.stats.pool) || null;
-  if (a && b) return n0(a.ts) >= n0(b.ts) ? a : b;
-  return a || b || {};
+  return (S.prod && S.prod.pool) || {};
 }
 
 function poolSeriesOf() {
   const a = (S.prod && S.prod.pool_series) || null;
-  if (Array.isArray(a) && a.length) return a;
-  const b = (S.stats && S.stats.pool_series) || null;
-  return Array.isArray(b) ? b : [];
+  return Array.isArray(a) ? a : [];
 }
 
 function renderPool() {
@@ -680,11 +575,11 @@ function renderPool() {
   drawChart('poolChart', {
     xs: ps.map((p) => p.ts),
     series,
-    emptyText: S.stats || S.prod ? '还没有池深采样' : panelMsg('统计', '正在加载…'),
+    emptyText: S.prod ? '还没有池深采样' : panelMsg('采集端', '正在加载…'),
   });
 
   const p = poolOf();
-  const loaded = !!(S.stats || S.prod);
+  const loaded = !!S.prod;
   const keep = n0(p.keep_available);
   const low = keep > 0 && n0(p.n_available) < keep / 2;
   const eta = p.eta_empty_min;
@@ -814,7 +709,7 @@ function renderBanner() {
   const first = ps.find((x) => isNum(x.n_available));
   const last = ps.slice().reverse().find((x) => isNum(x.n_available));
   const falling = first && last && last.n_available < first.n_available;
-  if ((S.stats || S.prod) && live === 0 && (falling || n0(p.consume_rate_per_h) > n0(p.produce_rate_per_h))) {
+  if (S.prod && live === 0 && (falling || n0(p.consume_rate_per_h) > n0(p.produce_rate_per_h))) {
     out.push(`<div class="alert bad"><b>采集端可能已停</b><span>池深在下降，但没有任何存活的
       <code>pt-*</code> 作业在产包。检查 ACP 上的常驻作业是否被回收。</span></div>`);
   }
@@ -824,8 +719,24 @@ function renderBanner() {
 
 /* ---------------------------------------------------------------- 包列表 */
 
+function srcTag(p) {
+  if (!p.source) return '<span class="dim">—</span>';
+  const ai = p.source === 'ai';
+  return `<span class="tag" style="border-color:${ai ? 'var(--acc)' : 'var(--warn)'};
+    color:${ai ? 'var(--acc)' : 'var(--warn)'}">${ai ? 'AI' : '人工'}</span>`;
+}
+
+function covCell(p) {
+  const cov = p.coverage;
+  return isNum(cov)
+    ? `<div class="bar"><i style="width:${Math.min(100, Math.round(cov * 100))}%;background:${
+        cov >= 0.99 ? 'var(--ok)' : 'var(--warn)'}"></i></div>
+       <div class="hint">${n0(p.n_labeled)}/${n0(p.n_targets)}（${pct(cov, 0)}）</div>`
+    : `<span class="dim">未提交</span>`;
+}
+
 function renderStateBtns() {
-  const counts = (S.packets && S.packets.counts) || (S.stats && S.stats.counts) || {};
+  const counts = (S.packets && S.packets.counts) || {};
   const total = S.packets ? n0(S.packets.total) : null;
   const el = $('#stateBtns');
   el.innerHTML = STATES.map(([k, label]) => {
@@ -840,7 +751,7 @@ function renderStateBtns() {
       if (!b) return;
       S.pkState = b.getAttribute('data-state');
       S.pkOffset = 0;
-      if (S.pkState !== 'need_human') S.pkSelected.clear();
+      S.pkSelected.clear();
       renderStateBtns();
       refreshPackets();
     });
@@ -849,14 +760,49 @@ function renderStateBtns() {
     : S.pkQ ? `匹配 ${total} 个包` : `共 ${total} 个包`;
 }
 
+function prRow(p) {
+  const st = STATE_MAP[p.state] || { label: p.state || '未知', color: 'var(--dim)' };
+  const by = p.source === 'ai' ? (p.model_used || p.worker) : (p.lease_worker || p.worker);
+  return `<tr>
+    <td class="pid">${esc(p.packet_id)}
+      <div class="hint">${esc(p.sampling || '')} · ${fmtBytes(p.size_bytes)}</div></td>
+    <td><span class="tag" style="border-color:${st.color};color:${st.color}">${esc(st.label)}</span>
+      <div class="status">${esc(p.status_text || st.label)}</div></td>
+    <td>${srcTag(p)}</td>
+    <td class="pid">${by ? esc(by) : '<span class="dim">—</span>'}</td>
+    <td style="min-width:130px">${covCell(p)}</td>
+    <td class="pid">${p.producer_job_id ? esc(p.producer_job_id) : '<span class="dim">—</span>'}</td>
+    <td class="hint">${fmtTs(p.produced_at)}</td>
+  </tr>`;
+}
+
+function renderProducePackets() {
+  const d = S.prPackets;
+  const rows = (d && d.packets) || [];
+  const total = d ? n0(d.total) : null;
+  $('#prHint').textContent = total === null ? '按生产时间，后面是当前标注状态'
+    : (S.prQ ? `匹配 ${total} 个包` : `共 ${total} 个包，按生产时间`);
+  if (!rows.length) {
+    let msg = panelMsg('最新生产', '正在加载…');
+    if (d) msg = S.prQ ? `没有 packet_id 含「${esc(S.prQ)}」的包` : '还没有生产出来的包';
+    $('#prWrap').innerHTML = `<div class="empty">${msg}</div>`;
+    $('#prPager').innerHTML = '';
+    return;
+  }
+  $('#prWrap').innerHTML = `<div style="overflow-x:auto"><table class="pktable"><thead><tr>
+      <th>packet_id</th><th>标注状态</th><th>来源</th><th>标注员 / 模型</th>
+      <th>覆盖率</th><th>产出作业</th><th>生产时间</th>
+    </tr></thead><tbody>${rows.map(prRow).join('')}</tbody></table></div>`;
+  const from = S.prOffset + 1;
+  const to = S.prOffset + rows.length;
+  $('#prPager').innerHTML = `
+    <span class="hint">第 ${from}–${to} / ${total}</span>
+    <button type="button" class="ghost sm" data-pr-page="prev" ${S.prOffset <= 0 ? 'disabled' : ''}>上一页</button>
+    <button type="button" class="ghost sm" data-pr-page="next" ${to >= total ? 'disabled' : ''}>下一页</button>`;
+}
+
 function pkRow(p) {
   const st = STATE_MAP[p.state] || { label: p.state || '未知', color: 'var(--dim)' };
-  const cov = p.coverage;
-  const covCell = isNum(cov)
-    ? `<div class="bar"><i style="width:${Math.min(100, Math.round(cov * 100))}%;background:${
-        cov >= 0.99 ? 'var(--ok)' : 'var(--warn)'}"></i></div>
-       <div class="hint">${n0(p.n_labeled)}/${n0(p.n_targets)}（${pct(cov, 0)}）</div>`
-    : `<span class="dim">未提交</span>`;
   const gtCov = p.gt_coverage;
   const gtCell = isNum(gtCov)
     ? `<div class="bar"><i style="width:${Math.min(100, Math.round(gtCov * 100))}%"></i></div>
@@ -874,31 +820,29 @@ function pkRow(p) {
     ? flags.map((f) => `<span class="tag qc">${esc(f)}</span>`).join(' ')
     : '<span class="dim">—</span>';
 
-  const need = Array.isArray(p.need_frames) ? p.need_frames.length : null;
   const acts = [];
-  if (p.state === 'need_human' && need !== null) {
-    acts.push(`<span class="err">待修 ${need} 帧</span>`);
+  if (p.state === 'leased') {
+    acts.push(`<button type="button" class="warn sm" data-act="recall" data-pid="${esc(p.packet_id)}">撤回</button>`);
   }
   if (isNum(p.submission_id)) {
     const label = p.sub_state === 'pending' ? '去审核' : '再审核';
     acts.push(`<a href="/review/${p.submission_id}">${label}</a>`);
   }
+  acts.push(`<button type="button" class="danger sm" data-act="delete" data-pid="${esc(p.packet_id)}">删除</button>`);
 
-  const canSel = p.state === 'need_human';
-  const on = canSel && S.pkSelected.has(p.packet_id);
-  const chk = canSel
-    ? `<td class="chk"><input type="checkbox" data-pid="${esc(p.packet_id)}"${on ? ' checked' : ''}></td>`
-    : (S.pkState === 'need_human' ? '<td class="chk"></td>' : '');
+  const on = S.pkSelected.has(p.packet_id);
+  const chk = `<td class="chk"><input type="checkbox" data-pid="${esc(p.packet_id)}"${on ? ' checked' : ''}></td>`;
 
   return `<tr class="${on ? 'sel' : ''}" data-pid="${esc(p.packet_id)}">
     ${chk}
     <td class="pid">${esc(p.packet_id)}
       <div class="hint">${esc(p.sampling || '')} · ${fmtBytes(p.size_bytes)}</div></td>
-    <td><span class="tag" style="border-color:${st.color};color:${st.color}">${esc(st.label)}</span></td>
+    <td><span class="tag" style="border-color:${st.color};color:${st.color}">${esc(st.label)}</span>
+      <div class="status">${esc(p.status_text || st.label)}</div></td>
     <td>${src}</td>
     <td class="pid">${by ? esc(by) : '<span class="dim">—</span>'}
       ${p.workflow ? `<div class="hint">${esc(p.workflow)}</div>` : ''}</td>
-    <td style="min-width:130px">${covCell}</td>
+    <td style="min-width:130px">${covCell(p)}</td>
     <td style="min-width:130px">${gtCell}</td>
     <td>${isNum(p.mean_conf) ? p.mean_conf.toFixed(2) : '<span class="dim">—</span>'}</td>
     <td>${isNum(p.n_interp) ? p.n_interp : '<span class="dim">—</span>'}</td>
@@ -914,13 +858,8 @@ function renderPackets() {
   renderStateBtns();
   const d = S.packets;
   const rows = (d && d.packets) || [];
-  const bulk = $('#pkBulk');
-  if (bulk) bulk.style.display = S.pkState === 'need_human' ? 'flex' : 'none';
-  if (S.pkState !== 'need_human') S.pkSelected.clear();
-  else {
-    const keep = new Set(rows.map((p) => p.packet_id));
-    [...S.pkSelected].forEach((id) => { if (!keep.has(id)) S.pkSelected.delete(id); });
-  }
+  const keep = new Set(rows.map((p) => p.packet_id));
+  [...S.pkSelected].forEach((id) => { if (!keep.has(id)) S.pkSelected.delete(id); });
 
   if (!rows.length) {
     let msg = panelMsg('包列表', '正在加载…');
@@ -934,10 +873,8 @@ function renderPackets() {
     syncPkSel();
     return;
   }
-  const chkHead = S.pkState === 'need_human'
-    ? '<th class="chk"><input type="checkbox" id="pkChkAll" title="全选本页"></th>' : '';
   $('#pkWrap').innerHTML = `<div style="overflow-x:auto"><table class="pktable"><thead><tr>
-      ${chkHead}
+      <th class="chk"><input type="checkbox" id="pkChkAll" title="全选本页"></th>
       <th>packet_id</th><th>状态</th><th>来源</th><th>标注员 / 模型</th>
       <th>覆盖率</th><th>GT 覆盖率</th><th>置信度</th><th>插值</th>
       <th>QC</th><th>产出作业</th><th>生产 / 标注 / 审核</th><th></th>
@@ -955,19 +892,36 @@ function renderPackets() {
   syncPkSel();
 }
 
+function selectedPackets() {
+  const rows = (S.packets && S.packets.packets) || [];
+  return rows.filter((p) => S.pkSelected.has(p.packet_id));
+}
+
 function syncPkSel() {
-  const n = S.pkSelected.size;
-  const btn = $('#pkRequeue');
-  if (btn) {
-    btn.disabled = !n;
-    btn.textContent = n ? `打回待标注（${n}）` : '打回待标注';
+  const rows = (S.packets && S.packets.packets) || [];
+  const sel = selectedPackets();
+  const nLease = sel.filter((p) => p.state === 'leased').length;
+  const nFix = sel.filter((p) => p.state === 'need_human').length;
+  const recall = $('#pkRecall');
+  const del = $('#pkDelete');
+  const req = $('#pkRequeue');
+  if (recall) {
+    recall.disabled = !nLease;
+    recall.textContent = nLease ? `撤回领取（${nLease}）` : '撤回领取';
+  }
+  if (del) {
+    del.disabled = !sel.length;
+    del.textContent = sel.length ? `删除（${sel.length}）` : '删除';
+  }
+  if (req) {
+    req.disabled = !nFix;
+    req.textContent = nFix ? `打回待标注（${nFix}）` : '打回待标注';
   }
   const hint = $('#pkSelHint');
-  if (hint) hint.textContent = n
-    ? `已选 ${n} 个，打回后进可领取（待标注）池`
-    : '勾选待修复包，可一次打回待标注池';
+  if (hint) hint.textContent = sel.length
+    ? `已选 ${sel.length} 个`
+    : '勾选后可以撤回标注中的包，或删除无用包';
   const allBtn = $('#pkSelAll');
-  const rows = ((S.packets && S.packets.packets) || []).filter((p) => p.state === 'need_human');
   if (allBtn) {
     const allOn = rows.length && rows.every((p) => S.pkSelected.has(p.packet_id));
     allBtn.textContent = allOn ? '取消全选' : '全选本页';
@@ -992,15 +946,52 @@ function togglePkSel(pid, on) {
 }
 
 function togglePkSelAll() {
-  const rows = ((S.packets && S.packets.packets) || []).filter((p) => p.state === 'need_human');
+  const rows = (S.packets && S.packets.packets) || [];
   const allOn = rows.length && rows.every((p) => S.pkSelected.has(p.packet_id));
   S.pkSelected.clear();
   if (!allOn) rows.forEach((p) => S.pkSelected.add(p.packet_id));
   renderPackets();
 }
 
+function actHint(okText, err) {
+  $('#pkSelHint').textContent = err ? (err.message || String(err)) : okText;
+}
+
+async function recallIds(ids) {
+  if (!ids.length) return;
+  if (!confirm(`撤回 ${ids.length} 个正在标注的包？\n租约释放后回到领取前的状态。`)) return;
+  try {
+    const d = await jpost('/api/v2/recall', { packet_ids: ids, reason: 'recalled' });
+    const n = (d.moved || []).length;
+    const skip = (d.skipped || []).length;
+    S.pkSelected.clear();
+    await refreshAll();
+    actHint(skip ? `已撤回 ${n} 个，跳过 ${skip} 个` : `已撤回 ${n} 个`);
+  } catch (e) {
+    actHint('', e);
+  }
+}
+
+async function deleteIds(ids) {
+  if (!ids.length) return;
+  const rows = ((S.packets && S.packets.packets) || []).filter((p) => ids.includes(p.packet_id));
+  const nGt = rows.filter((p) => n0(p.n_gt) > 0).length;
+  const nLease = rows.filter((p) => p.state === 'leased').length;
+  if (!confirm(`永久删除 ${ids.length} 个包？\n其中 ${nGt} 个已有入库 GT，${nLease} 个正在标注。\n提交、审核记录和缩略件会一起去掉，不能恢复。`)) return;
+  try {
+    const d = await jpost('/api/v2/delete', { packet_ids: ids });
+    const n = (d.deleted || []).length;
+    const skip = (d.skipped || []).length;
+    S.pkSelected.clear();
+    await refreshAll();
+    actHint(skip ? `已删除 ${n} 个，跳过 ${skip} 个` : `已删除 ${n} 个`);
+  } catch (e) {
+    actHint('', e);
+  }
+}
+
 async function requeueSelectedPk() {
-  const ids = [...S.pkSelected];
+  const ids = selectedPackets().filter((p) => p.state === 'need_human').map((p) => p.packet_id);
   if (!ids.length) return;
   if (!confirm(`把 ${ids.length} 个包从待修复打回待标注？\n之后按整包重标，不再只修打回帧。`)) return;
   try {
@@ -1008,11 +999,10 @@ async function requeueSelectedPk() {
     const n = (d.moved || []).length;
     const skip = (d.skipped || []).length;
     S.pkSelected.clear();
-    $('#pkSelHint').textContent = skip
-      ? `已打回 ${n} 个，跳过 ${skip} 个` : `已打回待标注 ${n} 个`;
     await refreshAll();
+    actHint(skip ? `已打回 ${n} 个，跳过 ${skip} 个` : `已打回待标注 ${n} 个`);
   } catch (e) {
-    $('#pkSelHint').textContent = e.message || String(e);
+    actHint('', e);
   }
 }
 
@@ -1020,19 +1010,24 @@ async function requeueSelectedPk() {
 
 function draw() {
   renderBanner();
-  renderCounts();
-  renderThroughput();
-  renderRate();
   renderPool();
   renderProducers();
+  renderProducePackets();
   renderPackets();
 }
 
-function packetsURL() {
+function packetsURL(kind) {
+  if (kind === 'produce') {
+    const q = new URLSearchParams({
+      state: 'all', order: 'produced',
+      limit: String(S.prLimit), offset: String(S.prOffset),
+    });
+    if (S.prQ) q.set('q', S.prQ);
+    return '/api/v2/packets?' + q.toString();
+  }
   const q = new URLSearchParams({
-    state: S.pkState,
-    limit: String(S.pkLimit),
-    offset: String(S.pkOffset),
+    state: S.pkState, order: 'updated',
+    limit: String(S.pkLimit), offset: String(S.pkOffset),
   });
   if (S.pkQ) q.set('q', S.pkQ);
   return '/api/v2/packets?' + q.toString();
@@ -1040,7 +1035,7 @@ function packetsURL() {
 
 async function refreshPackets() {
   try {
-    S.packets = await jget(packetsURL());
+    S.packets = await jget(packetsURL('manage'));
     S.errors = S.errors.filter((e) => !e.startsWith('包列表'));
   } catch (e) {
     S.errors = S.errors.filter((x) => !x.startsWith('包列表'));
@@ -1056,16 +1051,15 @@ async function refreshAll() {
   $('#refresh').disabled = true;
   clearTimeout(S.timer);
 
-  const win = WINDOWS.find((w) => w.hours === S.hours) || WINDOWS[1];
   const errs = [];
-  // allSettled：采集端接口挂了不该把整个看板一起打空
+  // allSettled：某一个接口挂了不该把整个看板一起打空
   const [a, b, c] = await Promise.allSettled([
-    jget(`/api/v2/stats?hours=${win.hours}&buckets=${win.buckets}`),
-    jget(`/api/v2/producers?hours=${win.hours}`),
-    jget(packetsURL()),
+    jget(`/api/v2/producers?hours=${S.hours}`),
+    jget(packetsURL('produce')),
+    jget(packetsURL('manage')),
   ]);
-  if (a.status === 'fulfilled') S.stats = a.value; else errs.push('统计：' + (a.reason.message || a.reason));
-  if (b.status === 'fulfilled') S.prod = b.value; else errs.push('采集端：' + (b.reason.message || b.reason));
+  if (a.status === 'fulfilled') S.prod = a.value; else errs.push('采集端：' + (a.reason.message || a.reason));
+  if (b.status === 'fulfilled') S.prPackets = b.value; else errs.push('最新生产：' + (b.reason.message || b.reason));
   if (c.status === 'fulfilled') S.packets = c.value; else errs.push('包列表：' + (c.reason.message || c.reason));
   S.errors = errs;
 
@@ -1095,10 +1089,39 @@ document.addEventListener('visibilitychange', () => {
 
 /* ---------------------------------------------------------------- 启动 */
 
+function tabFromHash() {
+  return location.hash === '#manage' ? 'manage' : 'produce';
+}
+
+function showTab(tab) {
+  S.tab = tab === 'manage' ? 'manage' : 'produce';
+  const produce = $('#tab-produce');
+  const manage = $('#tab-manage');
+  if (produce) produce.hidden = S.tab !== 'produce';
+  if (manage) manage.hidden = S.tab !== 'manage';
+  document.querySelectorAll('.sitenav a[data-tab]').forEach((a) => {
+    a.classList.toggle('on', a.getAttribute('data-tab') === S.tab);
+  });
+  $('#pageTitle').textContent = S.tab === 'manage' ? '数据包管理' : '数据包生产';
+  $('#pageSub').textContent = S.tab === 'manage'
+    ? '所有包的当前状态。标注中的可以撤回，无用的可以删除。审核在「数据包审核」。'
+    : 'ACP 作业，以及刚产出来的包现在标到哪一步。标注在标注员本机的 client/manual.py 里做。';
+  if (S.tab === 'produce' && $('#poolChart')._cfg) drawChart('poolChart', $('#poolChart')._cfg);
+}
+
 $('#refresh').onclick = refreshAll;
 $('#pkSelAll').onclick = togglePkSelAll;
+$('#pkRecall').onclick = () => recallIds(selectedPackets().filter((p) => p.state === 'leased').map((p) => p.packet_id));
+$('#pkDelete').onclick = () => deleteIds([...S.pkSelected]);
 $('#pkRequeue').onclick = requeueSelectedPk;
 $('#pkWrap').addEventListener('click', (e) => {
+  const act = e.target.closest('[data-act]');
+  if (act) {
+    const pid = act.getAttribute('data-pid');
+    if (act.getAttribute('data-act') === 'recall') recallIds([pid]);
+    else if (act.getAttribute('data-act') === 'delete') deleteIds([pid]);
+    return;
+  }
   const cb = e.target.closest('input[type=checkbox]');
   if (cb && cb.id === 'pkChkAll') {
     e.stopPropagation();
@@ -1134,6 +1157,25 @@ $('#pager').addEventListener('click', (e) => {
   }
 });
 
+async function refreshProduce() {
+  try {
+    S.prPackets = await jget(packetsURL('produce'));
+    S.errors = S.errors.filter((e) => !e.startsWith('最新生产'));
+  } catch (e) {
+    S.errors = S.errors.filter((x) => !x.startsWith('最新生产'));
+    S.errors.push('最新生产：' + (e.message || e));
+  }
+  renderBanner();
+  renderProducePackets();
+}
+
+$('#prPager').addEventListener('click', (e) => {
+  const pg = e.target.closest('[data-pr-page]');
+  if (!pg) return;
+  S.prOffset = Math.max(0, S.prOffset + (pg.getAttribute('data-pr-page') === 'next' ? S.prLimit : -S.prLimit));
+  refreshProduce();
+});
+
 let qTimer = null;
 $('#q').addEventListener('input', (e) => {
   clearTimeout(qTimer);
@@ -1145,19 +1187,31 @@ $('#q').addEventListener('input', (e) => {
   }, 300);
 });
 
+let prTimer = null;
+$('#prQ').addEventListener('input', (e) => {
+  clearTimeout(prTimer);
+  const v = e.target.value.trim();
+  prTimer = setTimeout(() => {
+    S.prQ = v;
+    S.prOffset = 0;
+    refreshProduce();
+  }, 300);
+});
+
 let rzTimer = null;
 window.addEventListener('resize', () => {
   clearTimeout(rzTimer);
   rzTimer = setTimeout(() => {
     // canvas 宽度由 CSS 决定，窗口一变就得按新宽度重画，否则会被拉伸糊掉
-    if ($('#tpChart')._cfg) drawChart('tpChart', $('#tpChart')._cfg);
-    if ($('#poolChart')._cfg) drawChart('poolChart', $('#poolChart')._cfg);
+    const cv = $('#poolChart');
+    if (cv && cv._cfg && !cv.closest('[hidden]')) drawChart('poolChart', cv._cfg);
   }, 150);
 });
 
-bindChart('tpChart', 'tpTip');
+window.addEventListener('hashchange', () => showTab(tabFromHash()));
 bindChart('poolChart', 'poolTip');
 renderWindowBtns();
+showTab(tabFromHash());
 draw();
 refreshAll();
 </script>

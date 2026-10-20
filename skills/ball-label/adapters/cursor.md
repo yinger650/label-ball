@@ -43,7 +43,7 @@ ln -sfn /path/to/label-ball/skills/ball-label ~/.cursor/skills/ball-label
 
 `PYTHONPATH` 必须给：MCP server 的工作目录不保证是仓库根。**不要**在这里写 `BALL_GT_API_TOKEN` 或 AOSS AK/SK —— `.cursor/mcp.json` 通常是要进 git 的。token 放仓库根 `.env`（已 gitignore）或 shell 环境。
 
-Settings → MCP 里能看到 `ball-label` 和它的 8 个工具，就算挂上了。
+Settings → MCP 里能看到 `ball-label` 和 `ball_plan` / `ball_strip` / `ball_submit` 等工具，就算挂上了。
 
 ## 3. 触发规则
 

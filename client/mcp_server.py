@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""stdio MCP server：把足球 GT 标注的数据面暴露成 8 个 `ball_*` 工具。
+"""stdio MCP server：把足球 GT 标注的数据面暴露成 `ball_*` 工具。
 
     <repo>/venv/bin/python -m client.mcp_server \
         --server https://ballgt.yinger650.com --worker <名字>
@@ -41,7 +41,7 @@ from client.run import DEFAULT_WORK  # noqa: E402
 log = logging.getLogger("client.mcp_server")
 
 SERVER_NAME = "ball-gt"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 # 客户端报的版本在这个集合里就照它回，否则回我们开发时对的那一版
 KNOWN_PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
 DEFAULT_PROTOCOL = "2025-06-18"
@@ -57,7 +57,7 @@ ERR_INTERNAL = -32603
 
 
 def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
-    """8 个工具。`handler` 返回 dict；带 `error` 键就当工具失败。"""
+    """工具表。`handler` 返回 dict；带 `error` 键就当工具失败。"""
 
     def t_lease(args: dict) -> dict:
         return sess_get().claim(
@@ -71,11 +71,75 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
     def t_frames(args: dict) -> dict:
         return sess_get().frames(str(args.get("packet_id") or ""))
 
+    def t_plan(args: dict) -> dict:
+        return sess_get().plan(str(args.get("packet_id") or ""))
+
     def t_scan(args: dict) -> dict:
         return sess_get().render_scan(
             packet_id=str(args.get("packet_id") or ""),
             kind=str(args.get("kind") or "time"),
             max_side=int(args.get("max_side") or 1400),
+        )
+
+    def t_overview(args: dict) -> dict:
+        return sess_get().render_overview(
+            packet_id=str(args.get("packet_id") or ""),
+            frame_idx=args.get("frame_idx"),
+        )
+
+    def t_strip(args: dict) -> dict:
+        return sess_get().render_strip(
+            packet_id=str(args.get("packet_id") or ""),
+            frame_idx=args.get("frame_idx"),
+            center=args.get("center"),
+            size=args.get("size"),
+            zoom=args.get("zoom"),
+            frames=args.get("frames"),
+            layers=args.get("layers"),
+            cols=args.get("cols"),
+            rows=args.get("rows"),
+        )
+
+    def t_nominate(args: dict) -> dict:
+        return sess_get().nominate(
+            packet_id=str(args.get("packet_id") or ""),
+            frame_idx=args.get("frame_idx"),
+            view_id=str(args.get("view_id") or ""),
+            cells=args.get("cells"),
+        )
+
+    def t_fit(args: dict) -> dict:
+        return sess_get().fit(str(args.get("packet_id") or ""))
+
+    def t_follow(args: dict) -> dict:
+        return sess_get().follow(
+            str(args.get("packet_id") or ""),
+            args.get("track"),
+        )
+
+    def t_commit(args: dict) -> dict:
+        return sess_get().commit(
+            str(args.get("packet_id") or ""),
+            frames=args.get("frames"),
+            track=args.get("track"),
+        )
+
+    def t_absent(args: dict) -> dict:
+        return sess_get().absent(
+            str(args.get("packet_id") or ""),
+            args.get("frames"),
+        )
+
+    def t_video(args: dict) -> dict:
+        return sess_get().render_video(
+            packet_id=str(args.get("packet_id") or ""),
+            frames=args.get("frames") or args.get("segment"),
+            fps=float(args.get("fps") or 1.0),
+            layers=str(args.get("layers") or "raw"),
+            x0=args.get("x0"),
+            y0=args.get("y0"),
+            w=args.get("w"),
+            h=args.get("h"),
         )
 
     def t_view(args: dict) -> dict:
@@ -162,8 +226,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             "name": "ball_frames",
             "description": (
                 "目标帧清单 + 已标记录 + 下一个未标帧。已标可见点 ≥1 个时还会给出"
-                "下一帧的线性外推中心 predicted.center（ROI 像素），直接拿去当 "
-                "ball_view 的 center。"
+                "下一帧的线性外推中心 predicted.center（ROI 像素）。进度请优先看 ball_plan。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -173,12 +236,25 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             "handler": t_frames,
         },
         {
+            "name": "ball_plan",
+            "description": (
+                "一包的进度板：每帧 empty/nominated/labeled/absent、该问的 query_frames、"
+                "球场边界、下一步建议。agent 不用自己记进度。冷启动先 overview+scan，"
+                "之后按 query_frames 做 strip+nominate，再 fit。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"packet_id": {"type": "string"}},
+                "required": ["packet_id"],
+            },
+            "handler": t_plan,
+        },
+        {
             "name": "ball_scan",
             "description": (
                 "看整包 Scan 图（产包端生成）。kind=time 是时间彩色编码（早蓝晚红），"
                 "一眼看出轨迹方向和该跳到哪一段；kind=dog 是灰度时间最大投影。"
-                "冷启动先看这张，再 ball_frames 挑 2 个锚点帧，然后 crop 480→80→45。"
-                "格子只用来描述位置，不能 ball_label。"
+                "冷启动先看这张找轨迹带。格子只用来描述位置，不能 ball_label。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -192,17 +268,162 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             "handler": t_scan,
         },
         {
+            "name": "ball_overview",
+            "description": (
+                "全景三段 1:1 raw 粗格子。只看人：球员聚在哪、谁在踢球。格子是搜索区，"
+                "不能 ball_label。冷启动用一次。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "frame_idx": {"type": "integer", "description": "不给就用第一个目标帧"},
+                },
+                "required": ["packet_id"],
+            },
+            "handler": t_overview,
+        },
+        {
+            "name": "ball_strip",
+            "description": (
+                "同一窗连续多帧横排（默认 240 px ≈ 1 个人，6×6），原图+滤波图，共用格子。"
+                "先看人的动作再提名。球可以是静止的。主力视图，不要再用 80/45 小窗当主视野。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "frame_idx": {"type": "integer"},
+                    "center": {**xy, "description": "窗中心 ROI 像素 [x,y]"},
+                    "size": {"type": "number", "default": 240, "description": "方窗边长，主力 240–480"},
+                    "frames": {"type": "array", "items": {"type": "integer"}},
+                    "layers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "默认 [raw, enh]",
+                    },
+                    "cols": {"type": "integer", "default": 6},
+                    "rows": {"type": "integer", "default": 6},
+                },
+                "required": ["packet_id", "frame_idx"],
+            },
+            "handler": t_strip,
+        },
+        {
+            "name": "ball_nominate",
+            "description": (
+                "对一帧提名 0–3 个候选格子。返回每个点的本地 verify（zone/dog/rgb/kine）。"
+                "可多可空。score 低的点不要当答案。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "frame_idx": {"type": "integer"},
+                    "view_id": {"type": "string", "description": "ball_strip / ball_view 返回的 view_id"},
+                    "cells": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "cell": {"type": "string"},
+                                "conf": {"type": "number"},
+                                "note": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+                "required": ["packet_id", "frame_idx"],
+            },
+            "handler": t_nominate,
+        },
+        {
+            "name": "ball_fit",
+            "description": (
+                "本地轨迹拟合，零模型调用。返回每帧坐标、残差、缺帧。可反复跑。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"packet_id": {"type": "string"}},
+                "required": ["packet_id"],
+            },
+            "handler": t_fit,
+        },
+        {
+            "name": "ball_follow",
+            "description": "把拟合轨迹画成 follow 条带，十字应钉在球上。不对就重 nominate，不要 commit。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "track": {"type": "array", "description": "不给就用最近一次 fit"},
+                },
+                "required": ["packet_id"],
+            },
+            "handler": t_follow,
+        },
+        {
+            "name": "ball_commit",
+            "description": (
+                "把拟合轨迹写入 labels。插值点和没过 verify 门（score<0.6 或出场）的帧拒绝并说明原因。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "frames": {"type": "array", "items": {"type": "integer"}},
+                    "track": {"type": "array"},
+                },
+                "required": ["packet_id"],
+            },
+            "handler": t_commit,
+        },
+        {
+            "name": "ball_absent",
+            "description": "把若干帧标成看不见球（visible=false）。猜错比空缺更有害。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "frames": {"type": "array", "items": {"type": "integer"}},
+                },
+                "required": ["packet_id", "frames"],
+            },
+            "handler": t_absent,
+        },
+        {
+            "name": "ball_video",
+            "description": (
+                "按目标帧重编 N fps 视频（默认 1 fps），第 t 秒 = 第 t 个目标帧。"
+                "视频路线通了就是主力。可裁一块 (x0,y0,w,h) 保分辨率。返回本机 mp4 路径。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "frames": {"type": "array", "items": {"type": "integer"}},
+                    "segment": {"type": "array", "items": {"type": "integer"}},
+                    "fps": {"type": "number", "default": 1},
+                    "layers": {"type": "string", "default": "raw"},
+                    "x0": {"type": "number"},
+                    "y0": {"type": "number"},
+                    "w": {"type": "number"},
+                    "h": {"type": "number"},
+                },
+                "required": ["packet_id"],
+            },
+            "handler": t_video,
+        },
+        {
             "name": "ball_view",
             "description": (
                 "出一张带网格的图，默认返回本机文件路径（读不了本地文件就再调 "
                 "ball_view_image 拿内联 PNG）。"
-                "mode='global'：ROI 横切三段、1:1 不缩小、原图+滤波图竖叠，三段共用"
-                "一套连续字母的粗格子，只用来定大概位置。"
-                "mode='crop'：以 center 为心裁 size 像素的方窗放大，共用一套格子。"
-                "必须逐级放大（480→80→45），别指望一张全景就点出球。"
-                "mode='time_grid'：同一小块画面的连续 9 帧拼 3×3，**没有格子、不能用来 "
-                "ball_label**；专门用来确认「这里到底有没有球」——球在 9 格里逐格平移，"
-                "灯光 / 边线交点 / 广告牌一动不动。冷启动认错目标会毁掉整包，先花一张图确认。"
+                "mode='global'：ROI 横切三段、1:1 不缩小、原图+滤波图竖叠。"
+                "mode='crop'：以 center 为心裁 size 像素的方窗。主力窗用 240–480 px"
+                "（装得下人），不要用 80/45 当主视野。"
+                "mode='time_grid'：连续 9 帧 3×3，默认每格 240 px，没有格子、不能 "
+                "ball_label。球可以是静止的。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -218,8 +439,8 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
                     "size": {
                         "type": "number",
                         "default": 480,
-                        "description": "方窗边长（ROI 像素）。crop 逐级用 480 → 80 → 45；"
-                                       "time_grid 默认 160。global 模式忽略。",
+                        "description": "方窗边长（ROI 像素）。主力 240–480；"
+                                       "time_grid 默认 240。global 模式忽略。",
                     },
                     "pane": {
                         "type": "string",
@@ -230,7 +451,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
                                        "静止的灯光和边线三色齐亮成灰白，丢了球想重新找到时用它；"
                                        "trail=时间最大投影（飞行轨迹连成亮带）。",
                     },
-                    "cols": {"type": "integer", "description": "列数。crop 默认 8，global 默认 9（三段各 3 列）"},
+                    "cols": {"type": "integer", "description": "列数。crop 默认 8×8（精修）；ball_strip 默认 6×6；global 默认 9"},
                     "rows": {"type": "integer", "description": "行数。crop 默认 8，global 默认 3"},
                 },
                 "required": ["packet_id", "frame_idx"],
@@ -283,8 +504,8 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         {
             "name": "ball_submit",
             "description": (
-                "整包提交，source=human 免审入库。目标帧没标满默认拒绝并列出缺哪些帧；"
-                "确实要交残包才传 force=true。"
+                "整包提交，source=ai 进审核队列（不再免审入库）。可见点必须过本地 "
+                "verify 门；没过的帧默认拒绝整包。目标帧没标满也拒绝。force=true 才放行。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -373,9 +594,11 @@ class McpServer:
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
             "instructions": (
-                "足球 GT 标注：ball_lease 领包 → ball_status 等 ready → ball_scan 读轨迹 "
-                "挑 2 个锚点帧 → 每帧 ball_view 逐级放大（480→80→45，只回格子号）→ "
-                "ball_label → 全部标完 ball_submit。只标比赛用球；看不见就 visible=false。"
+                "足球 GT 标注：ball_lease → ball_status 等 ready → ball_plan。"
+                "冷启动 ball_overview 看人 + ball_scan 读轨迹；之后对 query_frames "
+                "ball_strip(240–480) + ball_nominate → ball_fit → ball_follow → "
+                "ball_commit（过门才写）→ ball_submit（source=ai 进审核）。"
+                "视频路线通了用 ball_video。只标比赛用球；球可以是静止的；看不见就 absent。"
             ),
         }
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import string
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import cv2
@@ -515,7 +516,7 @@ def make_context_view(
     """细化级参考图：大约一个人大小的 RGB，画上当前局部窗和轨迹。不带格子。"""
     lx, ly, lw, lh = [float(v) for v in local_extent]
     size = float(max(person_size, max(lw, lh) * 2.0))
-    size = min(size, 640.0)
+    size = min(size, 960.0)
     cx, cy = float(center[0]), float(center[1])
     x0, y0 = cx - size / 2.0, cy - size / 2.0
     src, _is_enh, _name = _source(prep, frame_idx, "raw")
@@ -525,7 +526,7 @@ def make_context_view(
     chip = resize_to(chip, out, out, mode)
     img = _caption_pane(
         chip,
-        f"参考 RGB  f{frame_idx}  {int(size)}px≈人大小  青框=当前局部  橙线=轨迹  不要在这张图选格",
+        f"人体上下文 RGB  f{frame_idx}  {int(size)}px≈1-2人  判断依据  青框=局部窗  橙线=轨迹  无格子",
     )
     view = GridView(
         image=img, cols=1, rows=1, origin=(x0, y0),
@@ -694,6 +695,119 @@ def make_time_grid_view(
         yy, xx = r * (th + PANE_GAP), c * (tw + PANE_GAP)
         img[yy: yy + th, xx: xx + tw] = t
     return img, frames, labels
+
+
+def make_overview_view(
+    prep,
+    frame_idx: int,
+    n_strips: int = 3,
+    cols_per_strip: int = 3,
+    rows: int = 3,
+    layers: Sequence[str] = ("raw",),
+) -> Tuple["GridView", List["GridView"]]:
+    """冷启动全景：默认只出 raw。初判要看人，叠 DoG 只会干扰。"""
+    return make_global_strips(prep, frame_idx, n_strips, cols_per_strip, rows, panes=layers)
+
+
+def make_scan_view(
+    prep,
+    cols: int = 12,
+    rows: int = 6,
+    width: int = 1400,
+    kinds: Sequence[str] = ("time", "dog"),
+) -> GridView:
+    """产包端整包 Scan：scan_time 彩图 + scan_dog 上下叠，共用粗格子。"""
+    roi_w, roi_h = prep.size
+    pw = int(width)
+    ph = max(1, int(round(roi_h * pw / max(roi_w, 1))))
+    panels: List[np.ndarray] = []
+    for kind in kinds:
+        path = prep.scan_path("time" if kind == "time" else "dog")
+        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        if img is None:
+            img = np.zeros((max(roi_h, 1), max(roi_w, 1), 3), np.uint8)
+        mode = "maxpool" if kind == "dog" and pw < img.shape[1] else ("area" if pw < img.shape[1] else "nearest")
+        small = resize_to(img, pw, ph, mode)
+        title = "SCAN TIME  早蓝→晚红" if kind == "time" else "SCAN DOG  时间最大投影"
+        panels.append(_frame_pane(to_bgr(small), cols, rows, title))
+    stacked = _stack(panels, axis=0)
+    return GridView(
+        image=stacked, cols=cols, rows=rows, origin=(0.0, 0.0),
+        cell_w=roi_w / cols, cell_h=roi_h / rows, kind="scan",
+        frame_idx=-1, panes=list(kinds), upscale=pw / max(roi_w, 1),
+        extent=(0.0, 0.0, float(roi_w), float(roi_h)),
+        n_panels=len(panels), stack_axis=0,
+    )
+
+
+def make_frame_strip(
+    prep,
+    frames: Sequence[int],
+    center: Tuple[float, float],
+    size: float = 240.0,
+    cols: int = 6,
+    rows: int = 6,
+    tile: int = 280,
+    layers: Sequence[str] = ("raw", "enh"),
+    now: Optional[int] = None,
+) -> GridView:
+    """同一空间窗口的连续多帧横排，每帧上下两层 raw/DoG，共用一套格子。"""
+    fs = [int(f) for f in frames if prep.has(int(f))]
+    if not fs:
+        fs = [int(now if now is not None else 0)]
+    now_fi = int(now if now is not None else fs[-1])
+    x0, y0 = float(center[0]) - size / 2.0, float(center[1]) - size / 2.0
+    col_panels: List[np.ndarray] = []
+    for fi in fs:
+        panes: List[np.ndarray] = []
+        for layer in layers:
+            src, is_enh, name = _source(prep, fi, layer)
+            chip = crop_pad(src, x0, y0, size, size)
+            mode = "nearest" if tile >= size else ("maxpool" if is_enh else "area")
+            chip = to_bgr(resize_to(chip, tile, tile, mode))
+            mark = "  <<< NOW" if fi == now_fi else ""
+            panes.append(_frame_pane(chip, cols, rows, f"{name}  f{fi}{mark}"))
+        col_panels.append(_stack(panes, axis=0))
+    img = _stack(col_panels, axis=1)
+    return GridView(
+        image=img, cols=cols, rows=rows, origin=(x0, y0),
+        cell_w=size / cols, cell_h=size / rows, kind="strip",
+        frame_idx=now_fi, panes=list(layers), upscale=tile / max(size, 1.0),
+        extent=(x0, y0, float(size), float(size)),
+        n_panels=len(layers), stack_axis=0,
+    )
+
+
+def make_follow_strip(
+    prep,
+    track: Sequence[Tuple[int, float, float]],
+    size: float = 240.0,
+    tile: int = 220,
+    pane: str = "raw",
+) -> np.ndarray:
+    """沿拟合轨迹裁小窗横排，每帧画十字。复核用，不带格子。"""
+    tiles: List[np.ndarray] = []
+    for fi, x, y in track:
+        if not prep.has(int(fi)):
+            continue
+        src, is_enh, name = _source(prep, int(fi), pane)
+        chip = crop_pad(src, x - size / 2.0, y - size / 2.0, size, size)
+        mode = "nearest" if tile >= size else ("maxpool" if is_enh else "area")
+        chip = to_bgr(resize_to(chip, tile, tile, mode))
+        cx = cy = tile / 2.0
+        draw_marker(chip, cx, cy, color=(0, 0, 255), r=8)
+        pad = np.full((tile + TITLE_H + 6, tile + 6, 3), GUTTER_BG, np.uint8)
+        pad[TITLE_H + 3: TITLE_H + 3 + tile, 3: 3 + tile] = chip
+        cv2.putText(pad, f"{name}  f{fi}", (5, TITLE_H - 6), FONT, 0.45, TEXT_COLOR, 1, cv2.LINE_AA)
+        tiles.append(pad)
+    if not tiles:
+        return np.zeros((64, 64, 3), np.uint8)
+    th, tw = tiles[0].shape[:2]
+    img = np.full((th, len(tiles) * tw + (len(tiles) - 1) * PANE_GAP, 3), GUTTER_BG, np.uint8)
+    for i, t in enumerate(tiles):
+        xx = i * (tw + PANE_GAP)
+        img[:, xx: xx + tw] = t
+    return img
 
 
 def make_full_view(

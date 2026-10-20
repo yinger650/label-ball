@@ -11,7 +11,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -245,6 +245,41 @@ def decimate_clip(src: Path, dest: Path, decim: int) -> None:
         [
             "ffmpeg", "-y", "-v", "error", "-i", str(src),
             "-vf", vf, "-c:v", "libx264", "-crf", "16",
+            "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an", str(dest),
+        ],
+        check=True,
+    )
+
+
+def encode_indexed_clip(
+    src: Path,
+    dest: Path,
+    frame_indices: Sequence[int],
+    *,
+    fps: float = 1.0,
+    crf: int = 18,
+    crop: Optional[Tuple[int, int, int, int]] = None,
+) -> None:
+    """把指定源帧（clip 内 0-based）按给定 fps 重编。
+
+    M3 的 fps 上限是 5，所以把 100 个目标帧编成 1 fps / 100 秒，
+    模型说「第 t 秒」= 第 t 个目标帧。`crop=(x,y,w,h)` 先裁再编，给分块保分辨率用。
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    ids = [int(i) for i in frame_indices]
+    if not ids:
+        raise ValueError("frame_indices 为空")
+    expr = "+".join(f"eq(n\\,{i})" for i in ids)
+    vf = f"select='{expr}'"
+    if crop is not None:
+        x, y, w, h = (int(v) for v in crop)
+        vf += f",crop={w}:{h}:{x}:{y}"
+    vf += f",setpts=N/{float(fps)}/TB"
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-v", "error", "-i", str(src),
+            "-vf", vf, "-r", str(fps),
+            "-c:v", "libx264", "-crf", str(crf),
             "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an", str(dest),
         ],
         check=True,

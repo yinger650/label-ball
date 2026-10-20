@@ -23,13 +23,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from client import prompting, views as V  # noqa: E402
+from client import data_roots, prompting, views as V  # noqa: E402
 from client.prep import load_prepared, pano_to_roi  # noqa: E402
 from client.vlm import VlmPool  # noqa: E402
 from client.workflow import Workflow, _encode_model_image  # noqa: E402
 
-WORK = Path("/mnt/afs/wangmin/data/_ai_label_work/work")
-GT = Path("/mnt/afs/wangmin/data/_ai_label_work/gt")
+WORK = data_roots.default_work()
+GT = data_roots.GT
 
 
 def gt_points(prep, pid: str) -> dict:
@@ -67,11 +67,12 @@ def main() -> int:
     wf = Workflow.load("erp_ball_v2", pool)
     spec = next(s for s in wf.stages if s["id"] == "confirm9")
     size = float((spec.get("view") or {}).get("size", V.TIME_GRID_SIZE))
-    pids = a.packets or sorted({p.stem.split("__wangmin")[0] for p in GT.glob("*__wangmin.json")} & {d.name for d in a.work.iterdir() if d.is_dir()})
+    pids = a.packets or data_roots.available_gt_packets(GT, work=None if a.work == WORK else a.work)
 
     hit = miss = fp = tn = 0
     for pid in pids:
-        prep = load_prepared(a.work, pid)
+        root = a.work if (a.work / pid / "prepare.json").exists() else data_roots.find_prepared(pid)
+        prep = load_prepared(root, pid)
         gt = gt_points(prep, pid)
         frames = [f for f in prep.targets if f in gt]
         pick = frames[:: max(1, len(frames) // max(1, a.n))][: a.n]

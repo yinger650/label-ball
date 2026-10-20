@@ -669,6 +669,173 @@ def abandon_packet(
     }
 
 
+def packet_status_text(row: Dict[str, Any]) -> str:
+    """管理页用的一句话状态。名字来自租约、提交或最近一次审核。"""
+    state = str(row.get("state") or "")
+    worker = str(row.get("worker") or "").strip()
+    reviewer = str(row.get("reviewer") or "").strip()
+    if state == "leased":
+        who = str(row.get("lease_worker") or "").strip() or "未知"
+        kind = {"ai": "AI", "human": "人工", "repair": "修补"}.get(str(row.get("lease_kind") or ""), "")
+        tail = f"（{kind}）" if kind else ""
+        return f"被 {who} 领取标注中{tail}"
+    if state == "submitted":
+        who = worker or "未知"
+        return f"{who} 标注完，待审核"
+    if state == "accepted":
+        if reviewer:
+            return f"{reviewer} 已完成审核入库"
+        return f"{worker or '未知'} 已标注入库"
+    if state == "need_human":
+        need = row.get("need_frames")
+        n = len(need) if isinstance(need, list) else 0
+        tail = f"剩余 {n} 帧待重标" if n else "剩余部分待重标"
+        return f"{reviewer} 部分通过，{tail}" if reviewer else f"部分通过，{tail}"
+    if state == "available":
+        return "待领取"
+    if state == "archived":
+        return "已归档"
+    return state or "未知"
+
+
+def list_packets(
+    c: sqlite3.Connection,
+    *,
+    state: Optional[str] = None,
+    q: Optional[str] = None,
+    limit: int = 200,
+    offset: int = 0,
+    order: str = "updated",
+) -> Dict[str, Any]:
+    """包列表。顺手收回过期租约，免得管理页还显示已经掉线的领取。"""
+    expire_leases(c)
+    where, args = [], []
+    if state and state != "all":
+        where.append("p.state = ?")
+        args.append(state)
+    if q:
+        where.append("p.packet_id LIKE ?")
+        args.append(f"%{q}%")
+    order_sql = {
+        "produced": "p.produced_at DESC, p.created_at DESC",
+        "updated": "p.updated_at DESC",
+    }.get(order or "updated", "p.updated_at DESC")
+    sql = (
+        "SELECT p.packet_id, p.state, p.priority, p.n_targets, p.created_at, p.updated_at, "
+        "  p.produced_at, p.labeled_at, p.reviewed_at, p.thumb_ready, p.decim, p.clip_fps, "
+        "  p.group_name, p.stem, p.tag, p.sampling, p.size_bytes, p.producer_job_id, "
+        "  p.producer_node, p.need_frames_json, p.seed_json, p.seed_worker, p.seed_at, "
+        "  (SELECT COUNT(*) FROM gt g WHERE g.packet_id=p.packet_id) n_gt, "
+        "  (SELECT COUNT(*) FROM gt g WHERE g.packet_id=p.packet_id AND g.visible=1) n_gt_visible, "
+        "  (SELECT COUNT(*) FROM submissions x WHERE x.packet_id=p.packet_id) n_submissions, "
+        "  (SELECT MAX(x.created_at) FROM submissions x WHERE x.packet_id=p.packet_id) last_submitted_at, "
+        "  s.submission_id, s.source, s.worker, s.workflow, s.model_used, s.state sub_state, "
+        "  s.n_labeled, s.n_visible, s.n_interp, s.mean_conf, s.qc_json, s.bundle_path, "
+        "  s.created_at submitted_at, "
+        "  l.lease_id, l.worker lease_worker, l.kind lease_kind, l.expires_at lease_expires_at, "
+        "  (SELECT r.reviewer FROM reviews r JOIN submissions sx ON sx.submission_id=r.submission_id "
+        "    WHERE sx.packet_id=p.packet_id ORDER BY r.created_at DESC LIMIT 1) reviewer, "
+        "  (SELECT r.decision FROM reviews r JOIN submissions sx ON sx.submission_id=r.submission_id "
+        "    WHERE sx.packet_id=p.packet_id ORDER BY r.created_at DESC LIMIT 1) review_decision "
+        "FROM packets p LEFT JOIN submissions s ON s.submission_id = ("
+        "  SELECT submission_id FROM submissions x WHERE x.packet_id=p.packet_id "
+        "  ORDER BY x.n_labeled DESC, x.created_at DESC LIMIT 1) "
+        "LEFT JOIN leases l ON l.lease_id = ("
+        "  SELECT lease_id FROM leases x WHERE x.packet_id=p.packet_id AND x.released_at IS NULL "
+        "  ORDER BY x.created_at DESC LIMIT 1) "
+        + ("WHERE " + " AND ".join(where) + " " if where else "")
+        + f"ORDER BY {order_sql} LIMIT ? OFFSET ?"
+    )
+    out = []
+    for r in rows(c, sql, args + [int(limit), int(offset)]):
+        r["coverage"] = round(r["n_labeled"] / r["n_targets"], 3) if r.get("n_labeled") and r["n_targets"] else None
+        r["gt_coverage"] = round(r["n_gt"] / r["n_targets"], 3) if r["n_targets"] else None
+        qc = jload(r.pop("qc_json"), {}) or {}
+        r["qc_flags"] = qc.get("flags") or []
+        r["need_frames"] = jload(r.pop("need_frames_json"), None)
+        seed = jload(r.pop("seed_json"), None)
+        r["has_seed"] = bool(seed)
+        r["n_seed"] = len(seed) if isinstance(seed, (list, dict)) else 0
+        r["status_text"] = packet_status_text(r)
+        out.append(r)
+    total = int(scalar(c, "SELECT COUNT(*) FROM packets" + (" WHERE " + " AND ".join(
+        w.replace("p.", "") for w in where) if where else ""), args))
+    return {"packets": out, "total": total, "counts": pool_counts(c)}
+
+
+def recall_packets(
+    c: sqlite3.Connection,
+    packet_ids: Sequence[str],
+    reason: str = "recalled",
+) -> Dict[str, Any]:
+    """管理页撤回领取：释放未结束的租约，包回到领之前的状态。"""
+    moved: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    for pid in packet_ids:
+        pid = str(pid or "").strip()
+        if not pid:
+            continue
+        p = one(c, "SELECT packet_id, state FROM packets WHERE packet_id=?", (pid,))
+        if not p:
+            skipped.append({"packet_id": pid, "reason": "不存在"})
+            continue
+        if p["state"] != "leased":
+            skipped.append({"packet_id": pid, "reason": f"当前是 {p['state']}，只能撤回标注中的包"})
+            continue
+        open_rows = rows(
+            c,
+            "SELECT lease_id FROM leases WHERE packet_id=? AND released_at IS NULL "
+            "ORDER BY created_at DESC",
+            (pid,),
+        )
+        if not open_rows:
+            last = one(
+                c,
+                "SELECT prev_state FROM leases WHERE packet_id=? ORDER BY created_at DESC LIMIT 1",
+                (pid,),
+            )
+            back = (last or {}).get("prev_state") or "available"
+            c.execute(
+                "UPDATE packets SET state=?, updated_at=? WHERE packet_id=? AND state='leased'",
+                (back, now(), pid),
+            )
+            c.commit()
+            moved.append(pid)
+            continue
+        ok = False
+        for lease in open_rows:
+            if release_lease(c, lease["lease_id"], reason):
+                ok = True
+        if ok:
+            moved.append(pid)
+        else:
+            skipped.append({"packet_id": pid, "reason": "租约已释放"})
+    return {"moved": moved, "skipped": skipped, "reason": reason}
+
+
+def delete_packets(
+    c: sqlite3.Connection,
+    packet_ids: Sequence[str],
+) -> Dict[str, Any]:
+    """删掉无用包。提交、审核、租约随外键级联，GT 没有外键，要单独删。"""
+    deleted: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    for pid in packet_ids:
+        pid = str(pid or "").strip()
+        if not pid:
+            continue
+        p = one(c, "SELECT packet_id FROM packets WHERE packet_id=?", (pid,))
+        if not p:
+            skipped.append({"packet_id": pid, "reason": "不存在"})
+            continue
+        c.execute("DELETE FROM gt WHERE packet_id=?", (pid,))
+        c.execute("DELETE FROM packets WHERE packet_id=?", (pid,))
+        deleted.append(pid)
+    if deleted:
+        c.commit()
+    return {"deleted": deleted, "skipped": skipped}
+
+
 def is_fail_release(reason: Optional[str]) -> bool:
     """no_seed / 处理异常的释放：不算真正消耗，也不该立刻再发给同一 worker。"""
     s = str(reason or "")

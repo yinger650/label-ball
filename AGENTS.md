@@ -31,3 +31,17 @@ Provider：`cursor` / `codex` / `claude` / `openclaw` / `hermes` / `pi`。OpenCl
 Agent 来不及收口时，看板约 30 分钟无新日志会把该 Run 标成 **failed**，摘要为「任务被打断（无后续上报）」。
 
 禁止：打印 token；用 viewer token（`abp_v_`）；因为上报失败而停下用户任务。
+
+## 足球 GT 标注
+
+`ball-label` MCP server 提供领包 / 出图 / 提名 / 拟合 / 提交。被要求标球时读
+`skills/ball-label/SKILL.md`，按里面的流程干活，不要自己发明流程。
+
+- 只标比赛中正在使用的那一个球；场边备用球不标。球**可以是静止的**。
+- 冷启动：`ball_overview` 看人 + `ball_scan` 读轨迹。之后主力是
+  `ball_strip`（240–480 px，要看得见人）+ `ball_nominate`，不要用 80/45 小窗当主视野。
+- 平直段隔 2–3 帧提名，踢球/落地才密标。本地 `ball_fit` → `ball_follow` → `ball_commit`。
+- 只回答格子号（如 `C3`）。看不见就 `ball_absent`。
+- `ball_submit` 走 `source=ai` **进审核**，必须过本地 verify 门。不再免审入库。
+- 冷启动找不到球就 `ball_release`，别硬标。
+- Codex 不读 `skills/`，本段 + `~/.codex/config.toml` 才是触发面，见 `skills/ball-label/adapters/codex.md`。

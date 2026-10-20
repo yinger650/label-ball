@@ -41,13 +41,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from client import prompting, views as V  # noqa: E402
+from client import data_roots, prompting, views as V  # noqa: E402
 from client.prep import load_prepared, pano_to_roi, prepare_packet  # noqa: E402
 from client.vlm import VlmPool, extract_json  # noqa: E402
 
-DEFAULT_WORK = Path("/mnt/afs/wangmin/data/_ai_label_work/work")
-DEFAULT_GT = Path("/mnt/afs/wangmin/data/_ai_label_work/gt")
-DEFAULT_PACKETS = Path("/mnt/afs/wangmin/data/_ai_label_work/packets")
+DEFAULT_WORK = data_roots.default_work()
+DEFAULT_GT = data_roots.GT
+DEFAULT_PACKETS = data_roots.PACKETS
 OUT_DIR = Path("/mnt/afs/wangmin/data/_ai_label_work/smoke")
 
 
@@ -270,11 +270,16 @@ def main() -> None:
     missing = [n for n, c in pool.cfgs.items() if not c.has_key]
     print(f"可用供应商: {provs}" + (f"   (缺 key: {missing})" if missing else ""))
 
+    work = a.work
+    if not (work / a.packet / "prepare.json").exists():
+        found = data_roots.find_prepared(a.packet)
+        if (found / a.packet / "prepare.json").exists():
+            work = found
     zp = a.packets / f"{a.packet}.zip"
-    if not (a.work / a.packet / "prepare.json").exists() and zp.exists():
+    if not (work / a.packet / "prepare.json").exists() and zp.exists():
         print(f"准备 {a.packet} …")
-        prepare_packet(zp, a.work)
-    prep = load_prepared(a.work, a.packet)
+        prepare_packet(zp, work)
+    prep = load_prepared(work, a.packet)
     gt = load_gt(a.gt, a.packet, prep)
     if not gt:
         raise SystemExit(f"{a.packet} 没有可用的人工 GT，无从判断模型答得对不对")

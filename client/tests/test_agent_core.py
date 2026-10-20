@@ -8,7 +8,7 @@
    x=5626 宽 4036，右边界 9662 已经越过 7680 的全景 0° 接缝，任何地方自己写
    减法都会错一整个 pano 宽——所以断言拿 `prep.to_pano` 的结果直接对。
 2. **labels.json 的字段是 `blurred`**，不是 `motion_blur`。
-3. **目标帧没标满必须拒绝提交**，且 `submit` 走 `source="human"`。
+3. **目标帧没标满必须拒绝提交**，且 `submit` 走 `source="ai"` 进审核。
 
 顺带在进程内喂一遍 stdio JSON-RPC，确认 MCP 那层真的会说协议、工具名没漂。
 
@@ -354,7 +354,7 @@ def test_label_field_names_and_guard() -> None:
 
 
 def test_submit_rejects_missing_then_accepts() -> None:
-    print("== ball_submit：缺目标帧必须拒绝；标满后 source=human ==")
+    print("== ball_submit：缺目标帧必须拒绝；标满后 source=ai ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_submit_"))
     sess, api, _ = _claimed(tmp)
     targets = _meta()["targets"][:N_TARGETS]
@@ -379,8 +379,8 @@ def test_submit_rejects_missing_then_accepts() -> None:
     assert ok["n_labeled"] == N_TARGETS and ok["submission_id"] == 7, ok
     assert len(api.submitted) == 1
     sub = api.submitted[0]
-    assert sub["source"] == "human", sub["source"]
-    assert sub["result"]["source"] == "human", sub["result"]["source"]
+    assert sub["source"] == "ai", sub["source"]
+    assert sub["result"]["source"] == "ai", sub["result"]["source"]
     assert sub["lease_id"] == "lease-agent-1" and sub["worker"] == "smoke-agent"
     assert sub["result"]["annotator"] == "smoke-agent"
     assert sub["result"]["packet_id"] == PACKET
@@ -389,7 +389,7 @@ def test_submit_rejects_missing_then_accepts() -> None:
     # 交完就封口
     assert sess.submit(PACKET).get("error")
     assert sess.label(PACKET, targets[0], visible=False).get("error")
-    print(f"  缺 {N_TARGETS - 1} 帧被拒；标满后 submit source=human "
+    print(f"  缺 {N_TARGETS - 1} 帧被拒；标满后 submit source=ai "
           f"n_labeled={ok['n_labeled']} submission_id={ok['submission_id']}；提交后封口")
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -420,7 +420,7 @@ def test_submit_force_and_release() -> None:
     sess.label(PACKET, targets[0], visible=False)
     ok = sess.submit(PACKET, force=True)
     assert ok.get("ok") and ok["forced"] is True and ok["n_labeled"] == 1, ok
-    assert api.submitted[0]["source"] == "human"
+    assert api.submitted[0]["source"] == "ai"
 
     tmp2 = Path(tempfile.mkdtemp(prefix="ball_agent_rel_"))
     sess2, api2, _ = _claimed(tmp2)
@@ -445,6 +445,29 @@ def test_out_of_roi_cell_rejected() -> None:
     good = sess.resolve_point(got["view_id"], "H8")
     assert not good.get("error"), good
     print(f"  A1 落在黑边被拒；H8 → {good['roi_xy']} 正常")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_plan_nominate_commit_gate() -> None:
+    print("== plan / nominate / commit：过门才写入 ==")
+    tmp = Path(tempfile.mkdtemp(prefix="ball_agent_plan_"))
+    sess, _api, _ = _claimed(tmp)
+    fi = _meta()["targets"][0]
+    gt = {int(r["frame_idx"]): r for r in _gt_rows()}
+    row = gt[fi]
+    rx, ry = sess.prep(PACKET).to_roi(float(row["pano_x"]), float(row["pano_y"]))
+    pl = sess.plan(PACKET)
+    assert pl.get("n_targets") == N_TARGETS and pl["frames"][0]["state"] == "empty", pl
+    strip = sess.render_strip(PACKET, fi, center=[rx, ry], size=240)
+    assert strip.get("view_id") and strip["size"] == 240, strip
+    nom = sess.nominate(PACKET, fi, strip["view_id"], cells=[{"cell": strip["letters"][0] + "1", "conf": 0.4}])
+    assert nom.get("ok") and nom["candidates"][0].get("verify"), nom
+    # 乱点（ROI 左上）commit 应被拒
+    bad = sess.commit(PACKET, track=[{"frame_idx": fi, "x": 8.0, "y": 8.0, "interp": False}])
+    assert bad["n_accepted"] == 0 and bad["n_rejected"] >= 1, bad
+    good = sess.commit(PACKET, track=[{"frame_idx": fi, "x": rx, "y": ry, "interp": False}])
+    assert good["n_accepted"] == 1, good
+    print(f"  plan empty→nominate verify 在；乱点拒、GT 点收（{good['accepted']}）")
     shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -476,10 +499,13 @@ def test_mcp_stdio_protocol() -> None:
     assert srv.initialized is True, "notifications/initialized 该被收下且不回响应"
 
     names = [t["name"] for t in got[1]["result"]["tools"]]
-    assert names == [
-        "ball_lease", "ball_status", "ball_frames", "ball_view",
+    need = {
+        "ball_lease", "ball_status", "ball_frames", "ball_plan", "ball_scan",
+        "ball_overview", "ball_strip", "ball_nominate", "ball_fit", "ball_follow",
+        "ball_commit", "ball_absent", "ball_video", "ball_view",
         "ball_view_image", "ball_label", "ball_submit", "ball_release",
-    ], names
+    }
+    assert need <= set(names), sorted(need - set(names))
     for t in got[1]["result"]["tools"]:
         assert t["inputSchema"]["type"] == "object" and t["description"], t["name"]
         assert "handler" not in t, "handler 是本地函数，不许出现在协议里"
@@ -488,7 +514,7 @@ def test_mcp_stdio_protocol() -> None:
     assert got[2]["result"]["isError"] is False and body["packet_id"] == PACKET
     assert got[3]["result"]["isError"] is True, got[3]
     assert got[4]["error"]["code"] == -32601, got[4]
-    print(f"  8 个工具全在：{', '.join(names)}")
+    print(f"  {len(names)} 个工具全在：{', '.join(names)}")
     print("  未知工具 → isError=true（不是协议错）；未知方法 → -32601")
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -542,6 +568,7 @@ def main() -> int:
         test_submit_rejects_missing_then_accepts,
         test_submit_rejects_all_invisible,
         test_submit_force_and_release,
+        test_plan_nominate_commit_gate,
         test_out_of_roi_cell_rejected,
         test_mcp_stdio_protocol,
         test_mcp_view_image_inline,

@@ -53,7 +53,7 @@ providers:
     api_key_env: GLM_KEY
     max_concurrency: 3
     rpm: 60
-    timeout: 120
+    timeout: 180
     max_tokens: 1024
     image_format: png
     extra_body:
@@ -105,7 +105,7 @@ providers:
     api_key_env: MINIMAX_KEY
     max_concurrency: 2
     rpm: 40
-    timeout: 120
+    timeout: 180
     max_tokens: 192
     image_format: png
     # 小目标必须要 high：默认档会把图压到看不见球
@@ -116,16 +116,16 @@ providers:
 
   deepseek:
     base_url: https://api.deepseek.com
-    model: deepseek-v4-flash-vision-exp
+    model: deepseek-flash
     api_key_env: DEEPSEEK_KEY
     max_concurrency: 2
     rpm: 40
-    timeout: 120
-    max_tokens: 192
+    timeout: 180
+    max_tokens: 256
     image_format: png
     extra_body:
       thinking: {type: disabled}
-    notes: 每图 384 token 上限，细化阶段别指望
+    notes: DeepSeek-V4.1-Flash（官方视觉通道）。v4-pro 不支持图；旧 flash-vision-exp 已退役并路由到这里
 
   deepseek_text:
     base_url: https://api.deepseek.com

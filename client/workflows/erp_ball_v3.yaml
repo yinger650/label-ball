@@ -1,0 +1,239 @@
+# ERP 全景球场的球定位工作流 v3：在 v2 闸门之上改窗口与采样。
+#
+# v2 保留不动。v3 相对 v2 只改三件已经量化过的事：
+#   1. 主力窗 240 px（1 个人），不再用 80/45 —— 人工标注全程看的是球周边人的动作
+#   2. event_sample：有锚点之后平直段隔 2 帧问，事件邻域仍逐帧
+#   3. 提示词 refine.zh.txt 把人体上下文图升为定位依据
+#
+# ERP 全景球场的球定位工作流 v2：**以精度为第一目标**。
+#
+# 和 v1 的区别不是参数微调，是目标函数换了。v1 每一帧都要给一个答案，于是标定里
+# 中位误差 9.9 px 却带着 p90 = 97 px 的尾巴、放弃率 0 —— 少数「换了目标」的帧
+# （球员的白袜子、边线交点、场外的灯）单方面把成绩拖死，而它们照样带着 0.9 的置信度。
+#
+# v2 的口径：`precision@20px = |答出且误差≤20px| / |答出且非插值|`，目标 ≥ 85%，
+# 召回可以低。四件事撑起这个目标，三件不花模型调用：
+#
+#   1. 出场区掩膜（client/field.py，零调用）
+#      每个包的 meta.json 都带 field_corners_pano，v1 一次都没用过。四角按 x 环绕
+#      插值成地面边界 y_b(x)，边界之上留 60 px 空中余量（实测 299 个人工 GT 点
+#      0 误杀），再往上在入模图上压暗：滤波图 ×0.12、原图 ×0.35。看台那片碎亮斑
+#      在滤波图上基本清空，模型不会再去点；真有高抛球飞上去时它仍然可见。
+#
+#   2. 本地核验门（client/verify.py，零调用）
+#      在场内 / DoG 亮斑 / RGB 球感 / 轨迹一致 / 级间一致 五项证据相乘成 verify_score，
+#      `final_conf = model_conf × verify_score` 低于 verify.gate 就把这一帧写成
+#      没看见。实测这套判据在人工 GT 上的分是 0.998（p10 0.712），在故意偏
+#      40–150 px 的错点上是 0.209（p90 0.393）。
+#
+#   3. RGB 主 / DoG 辅写成规则（rgb_required，零调用）
+#      v1 的 refine3 两票是 [both, enh_only]，其中「只看 DoG」那一票主动邀请
+#      把答案落到球员脚和边线上。v2 改成 [both, raw_only]，并且从规则层面禁止
+#      只看过滤波图 / 扫描图的级被采纳 —— 它们的坐标只能当下一级的裁切中心。
+#
+#   4. 九宫格时间确认（confirm9，冷启动花 1 次调用）
+#      冷启动认错目标会毁掉一整包。单帧上灯光和球分不开，时间上分得开：
+#      球逐格平移，灯光一动不动。不通过就换候选，都不过就 no_seed 退回人工。
+#
+# 调用预算：稳定跟踪段 2 次/帧（refine2 + refine3），不确定时加投票或扫描图
+# 到 3–4 次，重新找球那一帧 5 次。实测平均 2.5–3.2 次/帧。
+#
+#   5. 跟丢就认输重找（defaults.lost_after，零调用）
+#      前四件事都做完之后标定暴露出一个更根本的问题：**没有任何一级负责重新找球**。
+#      v1 的 streak 挂在「refine2 说找不到」上，而模型永远给答案，于是跟丢之后
+#      整条链就在一个没有球的窗里继续精修。v2 把重找挂在「先验准不准」上，
+#      并且连续 2 帧没答出来就扔掉外推基线退回冷启动。
+#
+# v1 保留不动：v2 的任何一项改坏了都能立刻 `--workflow erp_ball_v1` 退回去。
+
+name: erp_ball_v3
+version: 1
+
+defaults:
+  model: primary
+  event_sample: true
+  event_stride: 2
+  event_acc: 25.0
+  # 稳定跟踪段实测 2.5 次/帧。上限放到 5 是给「重新找球」那一帧留位置：
+  # propose(global) + confirm9 + refine1 + refine2 + refine3 正好 5 次，卡在 4
+  # 会把收尾那一级掐掉，重新找回来的点就只有 10 px/格的精度。
+  max_calls_per_frame: 5
+  accept_conf: 0.35
+
+  # 跟丢之后怎么重新找球，分两档（见 client/workflow.py 里 lost_after 那段）。
+  #
+  # 没有这两条，核验门是**负收益**的：实测（v2_online06，54 帧）门限 0.6 在线跑
+  # precision 只有 63.6%，比同一批数据离线扫出来的 85.2% 低一大截 —— 弃帧之后
+  # 外推照旧从更旧的点往下滚，predict1 的中位误差滚到 105–128 px，而没有任何一级
+  # 负责重新找球。
+  #
+  # cold_after 留到 6 帧是因为冷启动本身很弱：实测 propose 的全局初选中位误差
+  # 446–919 px，confirm9 在那些位置上 100% 回「没有球」（它是对的）。所以宁可
+  # 多锚几帧在最后一个可信点上，也别急着退回冷启动。
+  lost_after: 2
+  cold_after: 6
+  # 扫出来的值，见 v1 里的说明。v2 没有改动它的理由。
+  chain_tol_cells: 1.2
+  chain_tol_px: 4
+
+  # 只看滤波图 / 扫描图的级不能被采纳，只能当下一级的中心。
+  # 这是「以 RGB 为主、以 DoG 为辅」的执行形式 —— 靠提示词劝是劝不住的。
+  rgb_required: true
+
+  verify:
+    enabled: true
+    # 门限由 scripts/calibrate.py --sweep-gate 在整链输出上扫出来后写回这里。
+    # 扫的时候要用 --verify-gate 0 跑一遍（不弃帧、只记分），否则只能往上扫。
+    #
+    # 0.60 是 v2_gate0 那次（54 帧 / 3 包）扫出来的：precision 85.2% / 召回 42.6%，
+    # 是 precision ≥ 85% 里召回最大的一档。再往上 0.70 能到 90.9% 但召回掉到 37%。
+    #
+    # 注意离线扫出来的是**下界**：在线跑的时候弃帧会让这一帧不进 `acc`，先验随之
+    # 失效，链路会自己退回冷启动重新找球，第二遍还会用双向先验把它捡回来。
+    gate: 0.6
+
+stages:
+
+  # ---- 冷启动：没有先验的时候才走 ----------------------------------------
+
+  # 本地 DoG blob 候选，已经过 field.play_mask —— 出场区的亮斑连分割都不参与。
+  # 它不是答案，只是给 global / confirm9 一个比 ROI 中心强的起点。
+  - id: propose
+    kind: local_propose
+    when: "not has_prior"
+    top_k: 8
+    radius: 420
+
+  # 九宫格时间确认。global（propose 里那次原图条带调用）给出位置之后，
+  # 用同一小块画面的连续 9 帧问一个是非题：这里有没有东西在按球的方式动。
+  # 不通过就换 propose 的下一个候选，最多 2 处。
+  #
+  # accept: false —— 它给的是格心，坐标很粗，只作 refine1 的中心。
+  - id: confirm9
+    kind: confirm_grid
+    when: "not has_prior and propose.ok"
+    accept: false
+    max_tries: 2
+    candidates: propose
+    view:
+      center: "propose"
+      # 240 不是 160：实测 160 px 的窗只有 47% 的帧在 t−8 那一格里还看得见球，
+      # 球早就飞出取景框了，于是 confirm9 一律回「没有球」（标定里 null_rate 100%）。
+      # 240 px + 每格隔 2 原始帧：100% 的帧至少 5 格看得见球，9 格总位移中位 55 px。
+      # 这个数就是 views.TIME_GRID_SIZE，改之前先跑 test_precision 里那两条。
+      size: 240
+      tiles: 9
+      pane: raw
+    model: primary
+
+  # 480 px 窗兜底。只有确认通过才走 —— 没通过说明那块地方压根没有球，
+  # 再钻下去只会把一个错点做得更精确。
+  - id: refine1
+    kind: vlm_grid
+    when: "not has_prior and confirm9.ok"
+    view:
+      type: crop
+      center: "confirm9 or propose or roi_center"
+      size: 480
+      upscale: 2
+      resample: lanczos
+      panes: [raw, enh]
+    grid: {cols: 6, rows: 6}
+    prompt: refine
+    model: primary
+
+  # ---- 主路径：有先验就从这里起跑 ----------------------------------------
+
+  # 外推入口。外推够准（不确定半径已落进 refine2 的 80 px 窗）时整级跳过；
+  # 跟丢的时候也跳过 —— 那种情况下外推的速度已经被证明是错的，200 px 窗只会
+  # 把一个错中心做得更精确，交给下面的 scan 用宽窗重新定位。
+  - id: predict1
+    kind: vlm_grid
+    when: "has_prior and prior_r > 30 and lost == 0"
+    view:
+      type: crop
+      center: predict
+      size: 240
+      upscale: 4
+      resample: nearest
+      panes: [raw, enh]
+    grid: {cols: 8, rows: 8}
+    prompt: refine
+    model: primary
+
+  # 扫描图重新定位，替掉 v1 的 streak。**放在 refine2 前面**，这一点是标定逼出来的。
+  #
+  # v1 的 streak 挂在 `not refine2.ok` 上，而 refine2 从来没有 not ok —— 模型永远
+  # 给答案，`null_rate` 是 0。于是 streak 在三个包上 ran=0，跟丢之后没有任何一级
+  # 负责重新找球，`refine2` 就在一个根本没有球的 80 px 窗里中位误差 94 px。
+  # v2 改成看**先验准不准**（外推不确定半径 / 上一帧有没有被核验门弃掉），
+  # 而不是看模型愿不愿意说找不到。
+  #
+  # v1 的 streak 看灰度时间最大投影，实测中位误差 40 px —— 根因是那张图上
+  # **看不出哪一段亮带是当前帧**。scan_rgb 把三段时间放进三个颜色通道
+  # （R=当前帧、G=之后、B=之前），静止的灯光和边线三色齐亮成灰白，一眼排除。
+  #
+  # 实测（GT 点上）这张图把当前位置定到中位 14.7 px / p90 25.9 px ——
+  # 够把 80 px 的窗收过去，不够当最终坐标，所以 accept: false。
+  - id: scan
+    kind: vlm_grid
+    when: "has_prior and (prior_r > 60 or lost > 0)"
+    accept: false
+    view:
+      type: crop
+      center: "predict1 or predict"
+      size: 240
+      upscale: 4
+      resample: nearest
+      panes: [scan_rgb, raw]
+      maxproj_span: 4
+    grid: {cols: 8, rows: 8}
+    prompt: scan
+    model: primary
+
+  # 主力级。240 px ≈ 一个人：看得见球周边人的动作。80/45 装不下人。
+  - id: refine2
+    kind: vlm_grid
+    when: "scan.ok or predict1.ok or refine1.ok or has_prior"
+    view:
+      type: crop
+      center: "scan or predict1 or refine1 or confirm9 or predict"
+      size: 240
+      upscale: 4
+      resample: nearest
+      panes: [raw, enh]
+    grid: {cols: 8, rows: 8}
+    prompt: refine
+    model: primary
+
+  # 收尾仍可开小窗，但上下文图（person_size=240）是定位依据。
+  - id: refine3
+    kind: vlm_grid
+    when: "refine2.ok"
+    view:
+      type: crop
+      center: "refine2"
+      size: 80
+      upscale: 8
+      resample: nearest
+      panes: [raw, enh]
+    grid: {cols: 8, rows: 8}
+    prompt: refine
+    model: primary
+    # 两票都必须有 RGB 证据。v1 这里是 [both, enh_only]，那一票「只看 DoG」
+    # 正是把答案带到球员脚和边线上的入口。
+    #
+    # 试过改成**无条件**投票（想拿「两票对不上」当怀疑信号），实测更差：
+    # precision 从 73.1% 掉到 54.2%（v2_vote，同一批 54 帧）。原因是两票**一起看错**
+    # 的时候会互相背书 —— `_run_vlm` 对「对得上」的情况给 ×1.15 加成，平均置信被
+    # 顶到 0.93–0.95，错点因此翻过了 0.6 的门限。两个都带 RGB 的视图相关性太高，
+    # 它们的一致不构成独立证据。所以维持条件触发。
+    vote:
+      n: 2
+      views: [both, raw_only]
+      tol_px: 6
+      when: "refine2.conf < 0.8"
+
+  # 离群剔除 + 插值 + 平滑，由 client/track.py 承接，不占模型调用。
+  - id: postprocess
+    kind: local

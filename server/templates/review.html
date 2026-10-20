@@ -109,13 +109,25 @@
   .legend { display:flex; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--dim); }
   .legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; }
 
-  #toast { position:fixed; left:50%; top:54px; transform:translateX(-50%); z-index:9;
+  .sitenav { flex:none; display:flex; gap:2px; padding:0 8px; background:#101216;
+             border-bottom:1px solid var(--line); }
+  .sitenav a { color:var(--dim); text-decoration:none; padding:9px 16px; font-size:13px;
+               border-bottom:2px solid transparent; }
+  .sitenav a:hover { color:var(--fg); text-decoration:none; }
+  .sitenav a.on { color:var(--fg); border-bottom-color:var(--acc); font-weight:600; }
+
+  #toast { position:fixed; left:50%; top:86px; transform:translateX(-50%); z-index:9;
            background:rgba(16,18,22,.96); border:1px solid var(--line); border-radius:8px;
            padding:9px 16px; display:none; align-items:center; gap:12px; max-width:70vw; }
 </style>
 </head>
 <body>
 
+<nav class="sitenav">
+  <a href="/#produce">数据包生产</a>
+  <a href="/#manage">数据包管理</a>
+  <a href="/review" class="on">数据包审核</a>
+</nav>
 <div id="top">
   <span class="pid" id="pid">审核</span>
   <span class="pill" id="pSub"></span>

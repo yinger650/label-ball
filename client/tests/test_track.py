@@ -188,6 +188,26 @@ def test_sustained_fast_motion() -> None:
     report("对照组：同幅度孤立跳变被剔")
 
 
+def test_spline_guard_falls_back_to_linear() -> None:
+    print("test_spline_guard_falls_back_to_linear")
+    fs = list(range(1000, 1030, 3))
+    n = len(fs)
+    xs: List[Optional[float]] = [None] * n
+    ys: List[Optional[float]] = [None] * n
+    # 4 个锚点、中间空洞 5 个目标帧。加速度先大后收，样条会鼓到 260+，线性约 155。
+    xs[0], ys[0] = 0.0, 0.0
+    xs[1], ys[1] = 10.0, 50.0
+    xs[2], ys[2] = 20.0, 150.0
+    xs[8], ys[8] = 80.0, 160.0
+    _lx, lin_y, _ = interpolate(fs, xs, ys, spline_max_gap=5)
+    _sx, spl_y, _ = interpolate(fs, xs, ys, spline_max_gap=99)
+    mid = 5
+    assert lin_y[mid] is not None and abs(lin_y[mid] - 155.0) < 5.0, lin_y[mid]
+    assert spl_y[mid] is not None
+    assert abs(spl_y[mid] - lin_y[mid]) > 40.0, (spl_y[mid], lin_y[mid])
+    report("k>=5 的空洞用线性，样条会被挡住", f"lin={lin_y[mid]:.1f} spline={spl_y[mid]:.1f}")
+
+
 def test_long_gap_stays_missing() -> None:
     print("test_long_gap_stays_missing")
     n = 50
@@ -441,6 +461,7 @@ def main() -> int:
         test_parabola_with_dropouts,
         test_isolated_outlier,
         test_sustained_fast_motion,
+        test_spline_guard_falls_back_to_linear,
         test_long_gap_stays_missing,
         test_smooth_keeps_endpoints,
         test_predict_next,

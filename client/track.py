@@ -42,6 +42,12 @@ DEFAULT_MAX_SPEED_PX = 400.0
 DEFAULT_MIN_OUTLIER_PX = 60.0
 DEFAULT_SMOOTH_WINDOW = 5
 DEFAULT_MAX_INTERP_GAP = 8
+# 锚点间隔（目标帧数）≥ 这个值时不用三次样条：实测 k=6 时样条 p90 过冲到 207 px，
+# k=12 到 1184 px，线性反而稳（中位 16 / 51 px）。速度门拦不住「两端锚点本身很远、
+# 中间缓缓鼓包」那种过冲。
+SPLINE_MAX_GAP = 5
+# 运动模型是静止段 + 弹道段的混合。3/15 个人工包球全程移动 ≤7 px，任何
+# 「必须在动 / 静止抑制」都会把真球杀掉。离群点只看孤立跳变，不看速度下限。
 # 单边拟合取几个邻居。4 个点配二次拟合是噪声放大与曲率跟随之间的折中。
 DEFAULT_FIT_SPAN = 4
 # 一次 process 里最多剔掉这么大比例的观测。真剔到这个量级说明模型整体跑飞了，
@@ -369,15 +375,15 @@ def interpolate(
     max_speed_px_per_sec: Optional[float] = None,
     velocity_guard: float = 2.0,
     spline_anchors: int = 4,
+    spline_max_gap: int = SPLINE_MAX_GAP,
 ) -> Tuple[List[Optional[float]], List[Optional[float]], List[bool]]:
     """填补空缺帧，返回 `(xs_out, ys_out, filled)`。
 
     * 只填**两侧都有已定帧**的空缺段；首尾外侧不外推（外推出来的位置没有任何约束，
       拿去当裁切窗中心比留空更危险）。
     * 段长 > `max_interp_gap` 个目标帧的洞保持 None。
-    * 每段单独取两侧最多 `spline_anchors` 个锚点做自然三次样条；锚点不足 4 个退化为
-      线性。**用局部锚点而不是全局样条**：全局样条会让一个长洞的两端牵动整条曲线的
-      二阶导，把好段也带歪。
+    * 每段单独取两侧最多 `spline_anchors` 个锚点做自然三次样条；锚点不足 4 个、或
+      空洞 ≥ `spline_max_gap` 个目标帧，退化为线性。大间隔时样条会过冲几百像素。
     * 填完做速度约束：段内每步位移超过 `velocity_guard × 速度上限`，说明两端锚点本身
       就不可信（样条在鼓包），退回线性插值。
     """
@@ -407,7 +413,9 @@ def interpolate(
         s = max(0, k - spline_anchors + 1)
         e = min(len(anchors), k + 1 + spline_anchors)
         tq = f[gap]
-        if e - s >= 4:
+        # 空洞按目标帧计。k>=6 时样条过冲已被留一交叉量过，这里提前退回线性。
+        use_spline = (e - s >= 4) and (len(gap) < int(spline_max_gap))
+        if use_spline:
             gx = _natural_cubic(af[s:e], ax[s:e], tq)
             gy = _natural_cubic(af[s:e], ay[s:e], tq)
         else:
@@ -597,6 +605,7 @@ def process(
     smooth_degree: int = 2,
     velocity_guard: float = 2.0,
     spline_anchors: int = 4,
+    spline_max_gap: int = SPLINE_MAX_GAP,
     interp_conf_decay: float = 0.7,
     detect: bool = True,
 ) -> Tuple[List[TrackPoint], TrackStats]:
@@ -647,6 +656,7 @@ def process(
         max_speed_px_per_sec=max_speed_px_per_sec,
         velocity_guard=velocity_guard,
         spline_anchors=spline_anchors,
+        spline_max_gap=spline_max_gap,
     )
 
     conf = [float(rows[i].conf or 0.0) if accepted[i] else 0.0 for i in range(n)]

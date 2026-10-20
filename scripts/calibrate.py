@@ -21,6 +21,8 @@
     venv/bin/python3 scripts/calibrate.py --tag v2 --frames 20
     venv/bin/python3 scripts/calibrate.py --compare base v2
     venv/bin/python3 scripts/calibrate.py --stages-only --frames 30   # 只测各级命中率，不跑整链
+    venv/bin/python3 scripts/calibrate.py --tag v3_minimax_seed3 \
+        --workflow erp_ball_v3 --provider minimax --seed-gt 3 --frames 0
 """
 
 from __future__ import annotations
@@ -38,13 +40,13 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from client import track as T, views as V  # noqa: E402
+from client import data_roots, track as T, views as V  # noqa: E402
 from client.prep import load_prepared, pano_to_roi  # noqa: E402
 from client.vlm import VlmPool  # noqa: E402
 from client.workflow import Workflow, to_obs  # noqa: E402
 
-WORK = Path("/mnt/afs/wangmin/data/_ai_label_work/work")
-GT = Path("/mnt/afs/wangmin/data/_ai_label_work/gt")
+WORK = data_roots.default_work()
+GT = data_roots.GT
 RESULTS = Path("/mnt/afs/wangmin/data/_ai_label_work/calib")
 
 
@@ -63,13 +65,10 @@ def load_gt(gt_dir: Path, packet_id: str, prep) -> Dict[int, Tuple[float, float]
 
 
 def available_packets(work: Path, gt_dir: Path) -> List[str]:
-    out = []
-    for d in sorted(work.iterdir()):
-        if (d / "prepare.json").exists() and any(
-            f.name.split("__wangmin")[0] == d.name for f in gt_dir.glob(f"{d.name}__*.json")
-        ):
-            out.append(d.name)
-    return out
+    """默认扫 acp/ + work/（6 包人工 GT 全在 acp/ 已解码）。显式 --work 则只看那一处。"""
+    if work in (data_roots.ACP, data_roots.WORK) or work == data_roots.default_work():
+        return data_roots.available_gt_packets(gt_dir)
+    return data_roots.available_gt_packets(gt_dir, work=work)
 
 
 # ---------------------------------------------------------------- 指标
@@ -321,7 +320,8 @@ def stages_only(pool: VlmPool, prep, gt, frames: List[int], levels: List[str],
 
 def print_report(rep: dict) -> None:
     print("\n" + "=" * 78)
-    print(f"标定报告  tag={rep['tag']}  workflow={rep.get('workflow')}  {rep['when']}")
+    print(f"标定报告  tag={rep['tag']}  workflow={rep.get('workflow')}  "
+          f"provider={rep.get('provider') or '-'}  seed_gt={rep.get('seed_gt', 0)}  {rep['when']}")
     print("=" * 78)
     for pid, r in rep["packets"].items():
         e = r["eval"]
@@ -412,11 +412,14 @@ def main() -> None:
     ap.add_argument("--work", type=Path, default=WORK)
     ap.add_argument("--gt", type=Path, default=GT)
     ap.add_argument("--workflow", default="erp_ball_v2")
-    ap.add_argument("--frames", type=int, default=20, help="每包测多少帧（整链模式下是连续的一段）")
+    ap.add_argument("--frames", type=int, default=20,
+                    help="每包测多少帧（整链模式下是连续的一段）。0 = 该包全部 GT 目标帧")
     ap.add_argument("--start", type=int, default=0, help="整链模式下从第几个目标帧开始")
     ap.add_argument("--seed-gt", type=int, default=0, metavar="N",
                     help="用人工 GT 喂前 N 帧当起始先验，绕开冷启动，单独测跟踪精度")
     ap.add_argument("--role", default="primary")
+    ap.add_argument("--provider", default=None,
+                    help="整链锁死一家供应商（VlmPool.pin），禁止角色降级")
     ap.add_argument("--seed", type=int, default=20260910)
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--stages-only", action="store_true", help="只单独测各级，不跑整链")
@@ -436,6 +439,8 @@ def main() -> None:
         return
 
     pool = VlmPool(use_cache=not a.no_cache)
+    if a.provider:
+        pool.pin(a.provider)
     pids = a.packets or available_packets(a.work, a.gt)
     if not pids:
         raise SystemExit("没有既 prepare 好又有人工 GT 的包")
@@ -445,6 +450,8 @@ def main() -> None:
 
     rep = {"tag": a.tag, "workflow": a.workflow if not a.stages_only else "stages_only",
            "when": time.strftime("%Y-%m-%d %H:%M"), "role": a.role,
+           "provider": a.provider,
+           "frames": a.frames, "seed_gt": a.seed_gt,
            "verify_gate": (None if wf is None else round(float(wf.verify_gate), 3)),
            "packets": {}}
     gates = list(a.sweep_gate) if a.sweep_gate else [0.0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8]
@@ -453,19 +460,23 @@ def main() -> None:
     per_packet: List[Tuple[list, dict, float]] = []  # (runs, gt, fps) 供合计口径复用
 
     for pid in pids:
-        prep = load_prepared(a.work, pid)
+        root = a.work
+        if not (root / pid / "prepare.json").exists():
+            root = data_roots.find_prepared(pid)
+        prep = load_prepared(root, pid)
         gt = load_gt(a.gt, pid, prep)
         if not gt:
             continue
         frames = sorted(gt)
+        n_pick = len(frames) if a.frames <= 0 else min(a.frames, len(frames))
         if a.stages_only:
             # 单级测试各帧互相独立，铺开抽样能覆盖更多场景
-            pick = [frames[i] for i in np.linspace(0, len(frames) - 1, min(a.frames, len(frames))).astype(int)]
+            pick = [frames[i] for i in np.linspace(0, len(frames) - 1, n_pick).astype(int)]
         else:
             # 整链必须跑**连续**的目标帧：外推先验是逐帧接力传下去的，跳着抽
             # 等于每一帧都在冷启动，测出来的是「没有先验时有多差」而不是流程本身
-            s = min(a.start, max(0, len(frames) - a.frames))
-            pick = frames[s : s + a.frames]
+            s = min(a.start, max(0, len(frames) - n_pick))
+            pick = frames[s : s + n_pick]
         t0 = time.time()
         if a.stages_only:
             rep["packets"][pid] = {"levels": stages_only(pool, prep, gt, pick, a.levels, a.role, a.seed),

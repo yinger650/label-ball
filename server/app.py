@@ -109,7 +109,7 @@ def _auth():
     # 公网审核页是浏览器直接 POST，审核员没有 API token。token 只挡
     # 机器写入口（lease/submit/register），避免匿名污染 gt。
     if request.path.startswith("/api/v2/review/") or request.path in (
-        "/api/v2/abandon", "/api/v2/requeue",
+        "/api/v2/abandon", "/api/v2/requeue", "/api/v2/recall", "/api/v2/delete",
     ):
         return None
     got = request.headers.get("X-Api-Token") or request.args.get("token") or (request.form.get("token") or "")
@@ -332,6 +332,26 @@ def api_requeue():
     return jsonify(out)
 
 
+def _packet_ids(d: Dict[str, Any]) -> Optional[List[str]]:
+    ids = d.get("packet_ids") or d.get("packet_id")
+    if isinstance(ids, str):
+        ids = [ids]
+    if not isinstance(ids, list) or not ids:
+        return None
+    return [str(x) for x in ids]
+
+
+def _drop_thumbs(pid: str) -> None:
+    if not SAFE_ID.match(pid):
+        return
+    root = thumb_root().resolve()
+    d = (root / pid).resolve()
+    if d == root or root not in d.parents:
+        return
+    if d.is_dir():
+        shutil.rmtree(d)
+
+
 @app.post("/api/v2/archive")
 def api_archive():
     """把无效 / 测试包移出领取池。只收 available / need_human。"""
@@ -359,6 +379,39 @@ def api_abandon():
     out = db.abandon_packet(conn(), packet_id, reason=reason, worker=worker)
     if not out.get("ok"):
         return bad(out.get("error") or "抛弃失败", 404)
+    return jsonify(out)
+
+
+@app.post("/api/v2/recall")
+def api_recall():
+    """撤回领取中的包。租约释放后回到领之前的状态。"""
+    ids = _packet_ids(body())
+    if not ids:
+        return bad("缺少 packet_ids")
+    out = db.recall_packets(conn(), ids, reason=str(body().get("reason") or "recalled"))
+    out["ok"] = bool(out["moved"])
+    return jsonify(out)
+
+
+@app.post("/api/v2/delete")
+def api_delete():
+    """删除无用包，连同 GT、提交和缩略件。"""
+    ids = _packet_ids(body())
+    if not ids:
+        return bad("缺少 packet_ids")
+    safe = [pid for pid in ids if SAFE_ID.match(pid)]
+    bad_ids = [pid for pid in ids if pid not in safe]
+    out = db.delete_packets(conn(), safe)
+    for pid in bad_ids:
+        out["skipped"].append({"packet_id": pid, "reason": "packet_id 非法"})
+    thumb_errors = []
+    for pid in out["deleted"]:
+        try:
+            _drop_thumbs(pid)
+        except OSError as e:
+            thumb_errors.append({"packet_id": pid, "reason": str(e)})
+    out["thumb_errors"] = thumb_errors
+    out["ok"] = bool(out["deleted"])
     return jsonify(out)
 
 
@@ -720,55 +773,22 @@ def _qc_flags(s: Dict[str, Any]) -> List[str]:
 
 @app.get("/api/v2/packets")
 def api_packets():
-    """包列表。看板一屏要的东西一次给全，不让前端再逐包补查。"""
-    state = request.args.get("state")
-    q = request.args.get("q")
-    limit = min(1000, int(request.args.get("limit") or 200))
-    offset = int(request.args.get("offset") or 0)
+    """包列表。看板一屏要的东西一次给全，不让前端再逐包补查。
 
-    where, args = [], []
-    if state and state != "all":
-        where.append("p.state = ?")
-        args.append(state)
-    if q:
-        where.append("p.packet_id LIKE ?")
-        args.append(f"%{q}%")
-    # 主提交按 n_labeled 降序挑，**不是**按时间降序：修补模式下人工只重标被打回的两三帧，
-    # 那条提交才是最新的，但拿它当这个包的代表会让一个已经 100% 入库的包在列表上显示成
-    # 「覆盖率 4%、QC 警告」。代表这个包的应该是那条覆盖全帧的提交。
-    sql = (
-        "SELECT p.packet_id, p.state, p.priority, p.n_targets, p.created_at, p.updated_at, "
-        "  p.produced_at, p.labeled_at, p.reviewed_at, p.thumb_ready, p.decim, p.clip_fps, "
-        "  p.group_name, p.stem, p.tag, p.sampling, p.size_bytes, p.producer_job_id, "
-        "  p.producer_node, p.need_frames_json, p.seed_json, p.seed_worker, p.seed_at, "
-        "  (SELECT COUNT(*) FROM gt g WHERE g.packet_id=p.packet_id) n_gt, "
-        "  (SELECT COUNT(*) FROM gt g WHERE g.packet_id=p.packet_id AND g.visible=1) n_gt_visible, "
-        "  (SELECT COUNT(*) FROM submissions x WHERE x.packet_id=p.packet_id) n_submissions, "
-        "  (SELECT MAX(x.created_at) FROM submissions x WHERE x.packet_id=p.packet_id) last_submitted_at, "
-        "  s.submission_id, s.source, s.worker, s.workflow, s.model_used, s.state sub_state, "
-        "  s.n_labeled, s.n_visible, s.n_interp, s.mean_conf, s.qc_json, s.bundle_path, "
-        "  s.created_at submitted_at "
-        "FROM packets p LEFT JOIN submissions s ON s.submission_id = ("
-        "  SELECT submission_id FROM submissions x WHERE x.packet_id=p.packet_id "
-        "  ORDER BY x.n_labeled DESC, x.created_at DESC LIMIT 1) "
-        + ("WHERE " + " AND ".join(where) + " " if where else "")
-        + "ORDER BY p.updated_at DESC LIMIT ? OFFSET ?"
-    )
-    c = conn()
-    out = []
-    for r in db.rows(c, sql, args + [limit, offset]):
-        r["coverage"] = round(r["n_labeled"] / r["n_targets"], 3) if r.get("n_labeled") and r["n_targets"] else None
-        r["gt_coverage"] = round(r["n_gt"] / r["n_targets"], 3) if r["n_targets"] else None
-        r["qc_flags"] = _qc_flags(r)
-        r["need_frames"] = db.jload(r.pop("need_frames_json"), None)
-        seed = db.jload(r.pop("seed_json"), None)
-        r["has_seed"] = bool(seed)
-        r["n_seed"] = len(seed) if isinstance(seed, list) else (len(seed) if isinstance(seed, dict) else 0)
-        r.pop("qc_json", None)
-        out.append(r)
-    total = int(db.scalar(c, "SELECT COUNT(*) FROM packets" + (" WHERE " + " AND ".join(
-        w.replace("p.", "") for w in where) if where else ""), args))
-    return jsonify({"packets": out, "total": total, "counts": db.pool_counts(c)})
+    `order=produced` 给生产页（最新产出来的在前），默认 `updated` 给管理页。
+    代表提交仍按覆盖帧数挑，不按时间：修补提交只有两三帧，拿它当代表会把已入库包显示成残的。
+    """
+    order = request.args.get("order") or "updated"
+    if order not in ("updated", "produced"):
+        order = "updated"
+    return jsonify(db.list_packets(
+        conn(),
+        state=request.args.get("state"),
+        q=request.args.get("q"),
+        limit=min(1000, int(request.args.get("limit") or 200)),
+        offset=int(request.args.get("offset") or 0),
+        order=order,
+    ))
 
 
 @app.get("/api/v2/submissions")
