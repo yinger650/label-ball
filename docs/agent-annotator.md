@@ -17,8 +17,11 @@ Server：`client/mcp_server.py`（标准库 stdio JSON-RPC 2.0，**不装 `mcp` 
 
 ```bash
 ./venv/bin/python -m client.mcp_server \
-  --server https://ballgt.yinger650.com --worker 你的名字
+  --server https://ballgt.yinger650.com --worker 你的名字 \
+  --harness codex --harness-version 0.46.0 --model gpt-5.6 --model-version 2026-09
 ```
+
+`--harness` / `--harness-version` / `--model` / `--model-version`（环境变量 `BALL_GT_HARNESS` / `BALL_GT_HARNESS_VERSION` / `BALL_GT_MODEL` / `BALL_GT_MODEL_VERSION`）是标注方法标记，也可以由 agent 在 `ball_lease` 里给。AI 提交缺 harness 或 model 会被服务端拒收。审核「重标」按这四个字段拉黑：同一组合不能再领同一个包。
 
 装到各家 agent：
 
@@ -36,7 +39,7 @@ bash skills/ball-label/install.sh
 
 | 工具 | 参数 | 干什么 |
 |---|---|---|
-| `ball_lease` | `worker?`, `kind="human"` | 领包，返回 `packet_id` / 目标帧数 / `roi`；**后台**起下载解码 + 租约心跳 |
+| `ball_lease` | `worker?`, `kind="human"`, `harness?`, `harness_version?`, `model?`, `model_version?` | 领包，返回 `packet_id` / 目标帧数 / `roi` / `produced_at`；**后台**起下载解码 + 租约心跳 |
 | `ball_status` | `packet_id` | 准备进度、已标帧数、下一个未标帧 |
 | `ball_plan` | `packet_id` | 每帧状态 + `query_frames` + 下一步 |
 | `ball_frames` | `packet_id` | 目标帧清单 + 已标记录 + `next_frame`；有可见点时附 `predicted.center` |

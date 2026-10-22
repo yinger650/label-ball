@@ -1,0 +1,209 @@
+{
+  "threshold_remaining_percent": 80,
+  "initial_remaining_percent": 93,
+  "model": "gpt-6.1",
+  "completed": [
+    {
+      "packet_id": "260618__VID_20260618_203221_00_002__0708_0718",
+      "frames": 100,
+      "visible": 98,
+      "absent": 2,
+      "submission_id": 255,
+      "remaining_percent": 92
+    },
+    {
+      "packet_id": "260910__VID_20260910_214257_00_004__0365_0375",
+      "frames": 100,
+      "visible": 75,
+      "absent": 25,
+      "submission_id": 256,
+      "remaining_percent": 92
+    },
+    {
+      "packet_id": "260517__VID_20260517_125036_00_002__0627_0637",
+      "frames": 100,
+      "visible": 89,
+      "absent": 11,
+      "submission_id": 257,
+      "remaining_percent": 91
+    },
+    {
+      "packet_id": "260723__VID_20260723_070144_00_040__0474_0484",
+      "frames": 100,
+      "visible": 99,
+      "absent": 1,
+      "submission_id": 258,
+      "remaining_percent": 91
+    },
+    {
+      "packet_id": "260903__VID_20260903_203134_00_003__0499_0509",
+      "submission_id": 259,
+      "frames": 100,
+      "visible": 90,
+      "absent": 10,
+      "remaining_percent": 90
+    },
+    {
+      "packet_id": "260910__VID_20260910_204157_00_002__0446_0456",
+      "submission_id": 260,
+      "frames": 100,
+      "visible": 100,
+      "absent": 0,
+      "remaining_percent": 90
+    },
+    {
+      "packet_id": "260128__003__0097_0107",
+      "submission_id": 261,
+      "frames": 100,
+      "visible": 100,
+      "absent": 0,
+      "remaining_percent": 89
+    },
+    {
+      "packet_id": "260312__004__1345_1355",
+      "submission_id": 262,
+      "frames": 100,
+      "visible": 93,
+      "absent": 7,
+      "remaining_percent": 89
+    },
+    {
+      "packet_id": "260319__001__1415_1425",
+      "submission_id": 263,
+      "frames": 100,
+      "visible": 100,
+      "absent": 0,
+      "remaining_percent": 88
+    },
+    {
+      "packet_id": "260723__VID_20260723_053236_00_037__0755_0765",
+      "submission_id": 264,
+      "frames": 100,
+      "visible": 92,
+      "absent": 8,
+      "remaining_percent": 88
+    },
+    {
+      "packet_id": "260517__VID_20260517_125036_00_001__0180_0190",
+      "submission_id": 265,
+      "frames": 100,
+      "visible": 100,
+      "absent": 0,
+      "remaining_percent": 87,
+      "note": "static ball inside center circle"
+    },
+    {
+      "packet_id": "260813__VID_20260813_203347_00_002__1678_1688",
+      "submission_id": 266,
+      "frames": 100,
+      "visible": 91,
+      "absent": 9,
+      "remaining_percent": 86
+    },
+    {
+      "packet_id": "260523__VID_20260523_103218_00_002__0528_0538",
+      "submission_id": 267,
+      "frames": 100,
+      "visible": 96,
+      "absent": 4,
+      "remaining_percent": 85
+    },
+    {
+      "packet_id": "260606__VID_20260606_095851_00_004__0377_0387",
+      "submission_id": 268,
+      "frames": 100,
+      "visible": 95,
+      "absent": 5,
+      "remaining_percent": 85
+    },
+    {
+      "packet_id": "260604__VID_20260604_214307_00_007__1713_1723",
+      "submission_id": 269,
+      "frames": 100,
+      "visible": 95,
+      "absent": 5,
+      "remaining_percent": 85
+    },
+    {
+      "packet_id": "260521__VID_20260521_203133_00_003__0139_0149",
+      "submission_id": 270,
+      "frames": 100,
+      "visible": 96,
+      "absent": 4,
+      "remaining_percent": 84
+    },
+    {
+      "packet_id": "260604__VID_20260604_203237_00_005__0744_0754",
+      "submission_id": 271,
+      "frames": 100,
+      "visible": 95,
+      "absent": 5,
+      "remaining_percent": 83
+    },
+    {
+      "packet_id": "260312__002__0296_0306",
+      "submission_id": 272,
+      "frames": 100,
+      "visible": 94,
+      "absent": 6,
+      "remaining_percent": 83
+    }
+  ],
+  "active_packet": null,
+  "latest_remaining_percent": 83,
+  "released": [
+    {
+      "packet_id": "260903__VID_20260903_203134_00_001__1235_1245",
+      "confirmed_target_frames": 24,
+      "reason": "cannot_locate_reliably_after_37118",
+      "submitted": false
+    },
+    {
+      "packet_id": "260319__003__0936_0946",
+      "submitted": false,
+      "reason": "cannot_locate_match_ball_reliably_after_occlusion"
+    },
+    {
+      "packet_id": "260813__VID_20260813_214320_00_004__0989_0999",
+      "submitted": false,
+      "reason": "cannot_locate_match_ball_at_cold_start"
+    },
+    {
+      "packet_id": "260128__001__1272_1282",
+      "submitted": false,
+      "reason": "cannot_reliably_distinguish_match_ball_from_far_goal_fence_after_38185",
+      "labels_written": 0
+    },
+    {
+      "packet_id": "260528__VID_20260528_203554_00_006__0253_0263",
+      "submitted": false,
+      "reason": "cannot_locate_match_ball_at_cold_start",
+      "labels_written": 0
+    },
+    {
+      "packet_id": "260813__VID_20260813_203347_00_002__1678_1688",
+      "submitted": false,
+      "reason": "packet_download_GetObject_failed"
+    },
+    {
+      "packet_id": "260528__VID_20260528_214144_00_007__0149_0159",
+      "submitted": false,
+      "reason": "cannot_reliably_locate_air_ball_in_RGB_after_kick",
+      "labels_written": 0
+    },
+    {
+      "packet_id": "260528__VID_20260528_203554_00_004__1510_1520",
+      "submitted": false,
+      "labels_written": 0,
+      "reason": "cannot_reliably_locate_fast_ball_after_goalkeeper_return"
+    },
+    {
+      "packet_id": "260518__VID_20260517_125036_00_001__1669_1679",
+      "submitted": false,
+      "labels_written": 0,
+      "reason": "cannot_locate_match_ball_at_cold_start"
+    }
+  ],
+  "status": "completed_at_user_request",
+  "stop_reason": "用户要求本包标完后结束"
+}

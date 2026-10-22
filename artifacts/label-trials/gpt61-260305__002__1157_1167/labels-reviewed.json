@@ -1,0 +1,196 @@
+{
+  "packet_id": "260305__002__1157_1167",
+  "model": "gpt-6.1",
+  "model_version": "undisclosed",
+  "harness": "codex",
+  "harness_version": "0.163.0-alpha.10.2",
+  "skill_sha256": "0ed43d085d4aa745b55ed41fd10044b50557a975375d32879351b032c0423808",
+  "n_reviewed": 20,
+  "n_visible": 18,
+  "n_absent": 2,
+  "total_targets": 100,
+  "confidence_used": false,
+  "submitted": false,
+  "labels": [
+    {
+      "frame_idx": 34688,
+      "visible": true,
+      "pano_x": 6702.0,
+      "pano_y": 2236.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34691,
+      "visible": true,
+      "pano_x": 6695.0,
+      "pano_y": 2229.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34694,
+      "visible": true,
+      "pano_x": 6690.0,
+      "pano_y": 2224.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34697,
+      "visible": true,
+      "pano_x": 6685.0,
+      "pano_y": 2220.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34700,
+      "visible": true,
+      "pano_x": 6678.0,
+      "pano_y": 2215.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34703,
+      "visible": true,
+      "pano_x": 6673.0,
+      "pano_y": 2210.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34706,
+      "visible": true,
+      "pano_x": 6593.0,
+      "pano_y": 2181.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34709,
+      "visible": true,
+      "pano_x": 6514.0,
+      "pano_y": 2159.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34712,
+      "visible": true,
+      "pano_x": 6447.0,
+      "pano_y": 2144.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34715,
+      "visible": true,
+      "pano_x": 6394.0,
+      "pano_y": 2129.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34718,
+      "visible": true,
+      "pano_x": 6346.0,
+      "pano_y": 2115.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34721,
+      "visible": false,
+      "pano_x": null,
+      "pano_y": null,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34724,
+      "visible": true,
+      "pano_x": 6270.0,
+      "pano_y": 2094.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34727,
+      "visible": true,
+      "pano_x": 6239.0,
+      "pano_y": 2085.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34730,
+      "visible": true,
+      "pano_x": 6211.0,
+      "pano_y": 2082.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34733,
+      "visible": true,
+      "pano_x": 6185.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34736,
+      "visible": false,
+      "pano_x": null,
+      "pano_y": null,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34739,
+      "visible": true,
+      "pano_x": 6145.0,
+      "pano_y": 2067.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34742,
+      "visible": true,
+      "pano_x": 6127.0,
+      "pano_y": 2065.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34745,
+      "visible": true,
+      "pano_x": 6108.0,
+      "pano_y": 2059.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    }
+  ]
+}

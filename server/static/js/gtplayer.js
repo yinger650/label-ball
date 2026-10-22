@@ -163,12 +163,19 @@ function gtBuildTracks(man, warns, hasCells) {
   return { tracks, hasCells: cells, mode };
 }
 
+/* 时间轴色条，三个页面的图例都按这四色写 */
+const GT_FRAME_COLORS = {
+  unlabeled: '#4b5563',
+  ball: '#4ade80',
+  interp: '#fbbf24',
+  invisible: '#f97316',
+};
+
 function gtDefaultFrameColor(f) {
-  if (!f.visible) return '#5b6270';
-  if (f.conf !== null && f.conf !== undefined && f.conf < GT_LOW_CONF) return '#f87171';
-  if (f.interp) return '#fbbf24';
-  if (f.noLabel) return '#3d4450';
-  return '#4ade80';
+  if (f.noLabel) return GT_FRAME_COLORS.unlabeled;
+  if (!f.visible) return GT_FRAME_COLORS.invisible;
+  if (f.interp) return GT_FRAME_COLORS.interp;
+  return GT_FRAME_COLORS.ball;
 }
 
 /* ---------------------------------------------------------------- 播放器 */
@@ -188,6 +195,7 @@ class GTPlayer {
     this.ping = false;
     this.inPt = 0;
     this.outPt = 0;
+    this.rangeSet = false;  // 用户是否手动选了段；false 时 [inPt,outPt] 只是默认的全段
     this.rejected = new Set();
     this.decision = null;
     this.series = null;
@@ -297,6 +305,7 @@ class GTPlayer {
     this.mode = tracksInfo.mode;
     this.inPt = 0;
     this.outPt = Math.max(0, this.frames.length - 1);
+    this.rangeSet = false;
     this.i = 0;
     this.rebuildSeries();
     const r = this.roi();
@@ -774,7 +783,7 @@ class GTPlayer {
       ctx.lineWidth = 4;
       ctx.strokeRect(2, 2, side - 4, side - 4);
       ctx.fillStyle = '#f87171';
-      ctx.fillText('已打回', side - 58, side - 12);
+      ctx.fillText('错误帧', side - 58, side - 12);
     }
     ctx.fillStyle = 'rgba(230,232,236,.75)';
     ctx.font = '12px ui-monospace,Menlo,monospace';
@@ -799,6 +808,7 @@ class GTPlayer {
     const bh = 26;
     const sw = w / n;
     const [lo, hi] = this.rangeBounds();
+    const single = !!this.opts.singleDefault && !this.rangeSet;
     const allRejected = this.frames.every((f) => this.rejected.has(f.frame_idx));
 
     for (let i = 0; i < n; i++) {
@@ -806,20 +816,9 @@ class GTPlayer {
       const x = i * sw;
       ctx.fillStyle = this.frameColorFn(f, this);
       ctx.fillRect(x, 0, Math.max(1, sw - (sw > 4 ? 1 : 0)), bh);
-      if (i < lo || i > hi) {
+      if (!single && (i < lo || i > hi)) {
         ctx.fillStyle = 'rgba(20,22,26,.68)';
         ctx.fillRect(x, 0, Math.max(1, sw), bh);
-      }
-      if (this.isRejected(f)) {
-        ctx.strokeStyle = '#f87171';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x + 1, 1, Math.max(2, sw - 2), bh - 2);
-        if (sw > 5) {
-          ctx.beginPath();
-          ctx.moveTo(x + 2, 2); ctx.lineTo(x + sw - 2, bh - 2);
-          ctx.moveTo(x + sw - 2, 2); ctx.lineTo(x + 2, bh - 2);
-          ctx.stroke();
-        }
       }
     }
     if (allRejected && n) {
@@ -828,11 +827,44 @@ class GTPlayer {
     }
     ctx.strokeStyle = '#60a5fa';
     ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(lo * sw + 1, 0); ctx.lineTo(lo * sw + 1, bh + 8); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo((hi + 1) * sw - 1, 0); ctx.lineTo((hi + 1) * sw - 1, bh + 8); ctx.stroke();
+    if (single) {
+      ctx.fillStyle = '#60a5fa';
+      ctx.fillRect(this.i * sw, bh + 1, Math.max(3, sw), 4);
+    } else if (this.opts.singleDefault) {
+      ctx.lineWidth = 3;
+      ctx.strokeRect(lo * sw + 1.5, 1.5, (hi - lo + 1) * sw - 3, bh - 3);
+      ctx.fillStyle = 'rgba(96,165,250,.55)';
+      ctx.fillRect(lo * sw, bh + 1, (hi - lo + 1) * sw, 4);
+      ctx.lineWidth = 2;
+    }
+    if (!single) {
+      ctx.beginPath(); ctx.moveTo(lo * sw + 1, 0); ctx.lineTo(lo * sw + 1, bh + 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo((hi + 1) * sw - 1, 0); ctx.lineTo((hi + 1) * sw - 1, bh + 8); ctx.stroke();
+    }
+    // 错误帧最后画，不被选段框盖住；格子太窄画不下叉就整格涂红
+    for (let i = 0; i < n; i++) {
+      const f = this.frames[i];
+      if (!this.isRejected(f)) continue;
+      const x = i * sw;
+      if (sw <= 6) {
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(x, 0, Math.max(2, sw), bh);
+        continue;
+      }
+      const onRed = this.frameColorFn(f, this) === '#f87171';
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, 1, sw - 2, bh - 2);
+      ctx.strokeStyle = onRed ? '#450a0a' : '#ef4444';
+      ctx.lineWidth = sw > 10 ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.moveTo(x + 2, 3); ctx.lineTo(x + sw - 2, bh - 3);
+      ctx.moveTo(x + sw - 2, 3); ctx.lineTo(x + 2, bh - 3);
+      ctx.stroke();
+    }
     ctx.fillStyle = '#60a5fa';
     ctx.font = '10px sans-serif';
-    if (sw > 8 || lo !== hi) {
+    if (!single && (sw > 8 || lo !== hi)) {
       ctx.fillText('头', lo * sw + 3, bh + 8);
       const tw = ctx.measureText('尾').width;
       ctx.fillText('尾', Math.max(lo * sw + 16, (hi + 1) * sw - tw - 3), bh + 8);
@@ -1255,7 +1287,7 @@ class GTPlayer {
       tr.className = i === this.i ? 'cur' : '';
       const cell = tr.querySelector('.rj');
       if (cell) cell.innerHTML = this.isRejected(this.frames[i])
-        ? '<span style="color:var(--bad)">打回</span>' : '';
+        ? '<span style="color:var(--bad)">错误</span>' : '';
       if (i === this.i && !this.playing) tr.scrollIntoView({ block: 'nearest' });
     });
   }
@@ -1279,6 +1311,14 @@ class GTPlayer {
     if (bMode) bMode.textContent = this.mode === 'follow' ? '固定区域 F' : '跟随 F';
     if (bLoop) bLoop.className = this.loop ? 'on' : '';
     if (bPing) bPing.className = this.ping ? 'on' : '';
+    if (this.opts.singleDefault) {
+      const [lo, hi] = this.rangeBounds();
+      const full = this.rangeSet && lo === 0 && hi === this.frames.length - 1;
+      const bSelAll = gt$('#bSelAll');
+      const bClr = gt$('#bClrRange');
+      if (bSelAll) bSelAll.className = full ? 'on' : '';
+      if (bClr) bClr.disabled = !this.rangeSet;
+    }
   }
 
   draw() {
@@ -1451,6 +1491,7 @@ class GTPlayer {
 
   setIn() {
     this.inPt = Math.min(this.i, this.outPt);
+    this.rangeSet = true;
     const f = this.frames[this.inPt];
     gtToast(`标记头 ${f ? f.frame_idx : ''}`, 900);
     this.draw();
@@ -1458,6 +1499,7 @@ class GTPlayer {
 
   setOut() {
     this.outPt = Math.max(this.i, this.inPt);
+    this.rangeSet = true;
     const f = this.frames[this.outPt];
     gtToast(`标记尾 ${f ? f.frame_idx : ''}`, 900);
     this.draw();
@@ -1466,7 +1508,16 @@ class GTPlayer {
   clearRange() {
     this.inPt = 0;
     this.outPt = Math.max(0, this.frames.length - 1);
-    gtToast('本段恢复全段', 900);
+    this.rangeSet = false;
+    gtToast(this.opts.clearRangeText || '本段恢复全段', 900);
+    this.draw();
+  }
+
+  selectAll() {
+    this.inPt = 0;
+    this.outPt = Math.max(0, this.frames.length - 1);
+    this.rangeSet = true;
+    gtToast(`已选取全段 ${this.frames.length} 帧`, 900);
     this.draw();
   }
 

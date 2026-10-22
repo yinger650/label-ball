@@ -148,6 +148,21 @@ def _merge_prior(pid: str, prior: list, mark_ai: bool = True) -> Dict[str, dict]
     return labels
 
 
+def _reset_repair_labels(pid: str, bad_frames: list, context: list) -> Dict[str, dict]:
+    """修补从服务端 GT 重新开始：错误帧留空，正确帧写成参照（`context`，提交时不回传）。
+
+    本地旧 labels 整个丢掉，否则上次留下的点会被当成人工标注再交一遍。
+    """
+    bad = {int(fi) for fi in bad_frames or []}
+    labels: Dict[str, dict] = {}
+    for r in context or []:
+        if not isinstance(r, dict) or r.get("frame_idx") is None or int(r["frame_idx"]) in bad:
+            continue
+        labels[str(int(r["frame_idx"]))] = {**r, "frame_idx": int(r["frame_idx"]), "context": True}
+    _write_labels(pid, labels)
+    return labels
+
+
 def _heartbeat_loop(lease_id: str, interval: float) -> None:
     api: ServerClient = _api()
     while True:
@@ -240,7 +255,7 @@ def page_review_queue():
 
 @app.get("/review/<int:submission_id>")
 def page_review(submission_id: int):
-    return send_from_directory(app.template_folder, "review.html")
+    return send_from_directory(app.template_folder, "workbench.html")
 
 
 @app.get("/api/whoami")
@@ -317,7 +332,10 @@ def api_claim():
         "meta": lease.meta,
         "done": False,
     })
-    _merge_prior(pid, lease.prior_labels, mark_ai=(kind == "repair" or mode == "repair"))
+    if kind == "repair" or mode == "repair":
+        _reset_repair_labels(pid, lease.target_frames, lease.context_labels)
+    else:
+        _merge_prior(pid, lease.prior_labels, mark_ai=False)
     threading.Thread(
         target=_heartbeat_loop, args=(lease.lease_id, float(CFG.get("hb_interval") or 120)),
         name=f"hb-{pid}", daemon=True,
@@ -360,12 +378,12 @@ def api_meta(packet_id: str):
     meta = prep.meta
     labels = _labels_dict(packet_id)
     mode = sess.get("mode") or "full"
-    targets = list(meta.targets)
     if mode == "repair" or sess.get("kind") == "repair":
-        tf = sess.get("target_frames") or []
-        if tf:
-            targets = [int(x) for x in tf]
         mode = "repair"
+    # 时间轴跟审核页同一套目标帧。prep.frames 是 clip 逐帧解码（step=3 时是目标帧的 3 倍），
+    # 拿来当格子会让两边帧数对不上，插值预览也会铺到不入库的帧上。
+    have = {int(x) for x in prep.frames}
+    grid = [int(x) for x in (meta.targets or []) if int(x) in have] or [int(x) for x in prep.frames]
     return jsonify({
         "packet_id": packet_id,
         "group": meta.group,
@@ -377,9 +395,9 @@ def api_meta(packet_id: str):
         "pano_size": list(meta.pano_size),
         "roi": list(meta.roi),
         "step": meta.step,
-        "frames": list(prep.frames),
-        "targets": targets,
-        "target_frames": sess.get("target_frames") or targets,
+        "frames": grid,
+        "targets": grid,
+        "target_frames": sess.get("target_frames") or grid,
         "labels": labels,
         "mode": mode,
         "kind": sess.get("kind") or "human",
@@ -458,15 +476,17 @@ def api_abandon_local(packet_id: str):
         or "anonymous"
     )
     reason = str(d.get("reason") or "bad_quality")
+    ban_video = bool(d.get("ban_video"))
     try:
-        resp = _api().abandon(packet_id, reason=reason, worker=worker)
+        resp = _api().abandon(packet_id, reason=reason, worker=worker, ban_video=ban_video)
     except ApiError as e:
         return jsonify({"error": str(e)}), (e.status if 400 <= int(e.status or 0) < 600 else 502)
     sess["done"] = True
     _save_session(packet_id, sess)
+    banned = (resp or {}).get("banned_video") if isinstance(resp, dict) else None
     return jsonify({
         "ok": True,
-        "message": "已抛弃本包（数据质量不行），已从审核和修复队列移除",
+        "message": "已移除本包，不再标注也不再生产" + (f"；已停用视频 {banned}" if banned else ""),
         **(resp if isinstance(resp, dict) else {}),
     })
 
@@ -562,7 +582,8 @@ def api_finish(packet_id: str):
             "n_interp": len(filled),
         }), 400
 
-    result = build_result(meta, worker, labels, {"elapsed_sec": None})
+    own = {k: v for k, v in labels.items() if not v.get("context")}
+    result = build_result(meta, worker, own, {"elapsed_sec": None})
     result["source"] = "human"
     resp = _api().submit(
         result, None,
@@ -575,16 +596,16 @@ def api_finish(packet_id: str):
     sid = (resp or {}).get("submission_id")
     return jsonify({
         "ok": True,
-        "n_labeled": len(labels),
+        "n_labeled": len(own),
         "submission_id": sid,
         "n_interp": len(filled),
         "has_bundle": False,
         "review_url": f"/review/{sid}" if sid else None,
         "message": (
-            f"整段不可见，已作为无球提交入库（{len(labels)} 帧）"
+            f"整段不可见，已作为无球提交入库（{len(own)} 帧）"
             if no_ball else
             (
-                f"已提交（{len(labels)} 帧，其中插值 {len(filled)}），免审入库"
+                f"已提交（{len(own)} 帧，其中插值 {len(filled)}），免审入库"
             )
         ),
         "seed_only": False,
@@ -731,7 +752,10 @@ def api_prepare(packet_id: str):
             "meta": lease.meta,
             "done": False,
         })
-        _merge_prior(packet_id, lease.prior_labels, mark_ai=True)
+        if lease.kind == "repair":
+            _reset_repair_labels(packet_id, lease.target_frames, lease.context_labels)
+        else:
+            _merge_prior(packet_id, lease.prior_labels, mark_ai=True)
     if packet_id not in _JOBS and not is_ready(_work(), packet_id):
         _start_prepare(packet_id, key)
     return jsonify({"ok": True, "packet_id": packet_id})

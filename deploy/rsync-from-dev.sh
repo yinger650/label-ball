@@ -7,6 +7,8 @@ DEST="${BALL_GT_ANNOTATOR_DEST:-/opt/ball_gt/}"
 
 rsync -az --delete \
   --exclude venv \
+  --exclude .venv \
+  --exclude .DS_Store \
   --exclude __pycache__ \
   --exclude .git \
   --exclude .packet_cache \

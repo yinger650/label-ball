@@ -27,6 +27,7 @@ lease → 找 ≥2 个可见点种子 → 下载 artifacts / prep → workflow �
 | `--seed-gt` | 无 | 调试：用这份 GT / result JSON 当种子（文件或目录） |
 | `--work` | `~/.cache/ball_ai/work`（`BALL_AI_WORK`） | 工作区 |
 | `--workflow` | `erp_ball_v2` | 对应 `client/workflows/<name>.yaml`；`erp_ball_v1` 留着随时退回去 |
+| `--model` / `--model-version` | VLM 池 primary 链第一个模型 / 空 | 标注方法标记；harness 固定 `label-ball-run`，版本 `{workflow}@{git sha}`。重标按这组拉黑 |
 | `--token` | 环境 / `.env` 的 `BALL_GT_API_TOKEN` | 写接口鉴权 |
 | `--idle` | `15` | 池空等待秒数 |
 | `--keep-work` | 关 | 提交后保留本机工作区 |

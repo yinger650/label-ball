@@ -1,0 +1,2204 @@
+{
+  "packet_id": "260312__002__0296_0306",
+  "mode": "review",
+  "pages": [
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-00.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-01.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-02.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-03.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-04.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-05.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-06.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-07.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-08.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-09.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-10.png",
+    "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/review-11.png"
+  ],
+  "trajectory": "/Users/wangmin/projects/label-ball/artifacts/label-trials/gpt61-full100-260312__002__0296_0306/trajectory.png",
+  "frames": [
+    {
+      "frame_idx": 8881,
+      "roi_origin": [
+        3398,
+        789
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3558.0,
+        949.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8884,
+      "roi_origin": [
+        3383,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3543.0,
+        947.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8887,
+      "roi_origin": [
+        3387,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3547.0,
+        948.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8890,
+      "roi_origin": [
+        3386,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3546.0,
+        948.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8893,
+      "roi_origin": [
+        3385,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3545.0,
+        947.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8896,
+      "roi_origin": [
+        3383,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3543.0,
+        947.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8899,
+      "roi_origin": [
+        3380,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3540.0,
+        946.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8902,
+      "roi_origin": [
+        3379,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3539.0,
+        946.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8905,
+      "roi_origin": [
+        3379,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3539.0,
+        946.0
+      ],
+      "page": 0,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8908,
+      "roi_origin": [
+        3377,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3537.0,
+        946.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8911,
+      "roi_origin": [
+        3372,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3532.0,
+        948.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8914,
+      "roi_origin": [
+        3365,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3525.0,
+        948.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8917,
+      "roi_origin": [
+        3357,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3517.0,
+        947.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8920,
+      "roi_origin": [
+        3350,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3510.0,
+        947.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8923,
+      "roi_origin": [
+        3344,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3504.0,
+        947.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8926,
+      "roi_origin": [
+        3338,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3498.0,
+        947.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8929,
+      "roi_origin": [
+        3327,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3487.0,
+        947.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8932,
+      "roi_origin": [
+        3318,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3478.0,
+        947.0
+      ],
+      "page": 1,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8935,
+      "roi_origin": [
+        3309,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3469.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8938,
+      "roi_origin": [
+        3300,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3460.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8941,
+      "roi_origin": [
+        3290,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3450.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8944,
+      "roi_origin": [
+        3280,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3440.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8947,
+      "roi_origin": [
+        3274,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3434.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8950,
+      "roi_origin": [
+        3266,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3426.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8953,
+      "roi_origin": [
+        3259,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3419.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8956,
+      "roi_origin": [
+        3251,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3411.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8959,
+      "roi_origin": [
+        3246,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3406.0,
+        948.0
+      ],
+      "page": 2,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8962,
+      "roi_origin": [
+        3239,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3399.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8965,
+      "roi_origin": [
+        3233,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3393.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8968,
+      "roi_origin": [
+        3228,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3388.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8971,
+      "roi_origin": [
+        3222,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3382.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8974,
+      "roi_origin": [
+        3217,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3377.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8977,
+      "roi_origin": [
+        3213,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3373.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 8980,
+      "roi_origin": [
+        3208,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3368.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8983,
+      "roi_origin": [
+        3204,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3364.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8986,
+      "roi_origin": [
+        3200,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3360.0,
+        948.0
+      ],
+      "page": 3,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 8989,
+      "roi_origin": [
+        3196,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3356.0,
+        948.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8992,
+      "roi_origin": [
+        3193,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3353.0,
+        948.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8995,
+      "roi_origin": [
+        3189,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3349.0,
+        948.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 8998,
+      "roi_origin": [
+        3186,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3346.0,
+        948.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9001,
+      "roi_origin": [
+        3183,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3343.0,
+        947.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9004,
+      "roi_origin": [
+        3181,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3341.0,
+        947.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9007,
+      "roi_origin": [
+        3178,
+        788
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3338.0,
+        948.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9010,
+      "roi_origin": [
+        3177,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3337.0,
+        947.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9013,
+      "roi_origin": [
+        3175,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3335.0,
+        947.0
+      ],
+      "page": 4,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9016,
+      "roi_origin": [
+        3174,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3334.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9019,
+      "roi_origin": [
+        3173,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3333.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9022,
+      "roi_origin": [
+        3172,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3332.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9025,
+      "roi_origin": [
+        3171,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3331.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9028,
+      "roi_origin": [
+        3171,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3331.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9031,
+      "roi_origin": [
+        3169,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3329.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9034,
+      "roi_origin": [
+        3162,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3322.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9037,
+      "roi_origin": [
+        3156,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3316.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9040,
+      "roi_origin": [
+        3150,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3310.0,
+        947.0
+      ],
+      "page": 5,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9043,
+      "roi_origin": [
+        3144,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3304.0,
+        947.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9046,
+      "roi_origin": [
+        3139,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3299.0,
+        947.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9049,
+      "roi_origin": [
+        3133,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3293.0,
+        946.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9052,
+      "roi_origin": [
+        3129,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3289.0,
+        946.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9055,
+      "roi_origin": [
+        3123,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3283.0,
+        946.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9058,
+      "roi_origin": [
+        3120,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3280.0,
+        946.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9061,
+      "roi_origin": [
+        3114,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3274.0,
+        947.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9064,
+      "roi_origin": [
+        3112,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3272.0,
+        947.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9067,
+      "roi_origin": [
+        3106,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3266.0,
+        946.0
+      ],
+      "page": 6,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9070,
+      "roi_origin": [
+        3097,
+        786
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3257.0,
+        946.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9073,
+      "roi_origin": [
+        3097,
+        787
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3257.0,
+        947.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9076,
+      "roi_origin": [
+        3075,
+        781
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3235.0,
+        941.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9079,
+      "roi_origin": [
+        3031,
+        775
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3191.0,
+        935.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9082,
+      "roi_origin": [
+        2991,
+        772
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3151.0,
+        932.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9085,
+      "roi_origin": [
+        2953,
+        775
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3113.0,
+        935.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9088,
+      "roi_origin": [
+        2923,
+        772
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3083.0,
+        932.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9091,
+      "roi_origin": [
+        2897,
+        768
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3057.0,
+        928.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9094,
+      "roi_origin": [
+        2872,
+        769
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3032.0,
+        929.0
+      ],
+      "page": 7,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9097,
+      "roi_origin": [
+        2849,
+        767
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3009.0,
+        927.0
+      ],
+      "page": 8,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9100,
+      "roi_origin": [
+        2831,
+        766
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2991.0,
+        926.0
+      ],
+      "page": 8,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9103,
+      "roi_origin": [
+        2812,
+        767
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2972.0,
+        927.0
+      ],
+      "page": 8,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9106,
+      "roi_origin": [
+        2795,
+        764
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2955.0,
+        924.0
+      ],
+      "page": 8,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9109,
+      "roi_origin": [
+        2779,
+        764
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2939.0,
+        924.0
+      ],
+      "page": 8,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9112,
+      "roi_origin": [
+        2779,
+        764
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "absent",
+      "roi_xy": null,
+      "page": 8,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9115,
+      "roi_origin": [
+        2757,
+        762
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2917.0,
+        922.0
+      ],
+      "page": 8,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9118,
+      "roi_origin": [
+        2747,
+        762
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2907.0,
+        922.0
+      ],
+      "page": 8,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9121,
+      "roi_origin": [
+        2743,
+        762
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2903.0,
+        922.0
+      ],
+      "page": 8,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9124,
+      "roi_origin": [
+        2740,
+        762
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2900.0,
+        922.0
+      ],
+      "page": 9,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9127,
+      "roi_origin": [
+        2736,
+        761
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2896.0,
+        921.0
+      ],
+      "page": 9,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9130,
+      "roi_origin": [
+        2731,
+        762
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2891.0,
+        922.0
+      ],
+      "page": 9,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9133,
+      "roi_origin": [
+        2729,
+        762
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2889.0,
+        922.0
+      ],
+      "page": 9,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9136,
+      "roi_origin": [
+        2726,
+        761
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2886.0,
+        921.0
+      ],
+      "page": 9,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9139,
+      "roi_origin": [
+        2722,
+        761
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2882.0,
+        921.0
+      ],
+      "page": 9,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9142,
+      "roi_origin": [
+        2722,
+        761
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "absent",
+      "roi_xy": null,
+      "page": 9,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9145,
+      "roi_origin": [
+        2722,
+        761
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "absent",
+      "roi_xy": null,
+      "page": 9,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9148,
+      "roi_origin": [
+        2722,
+        761
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "absent",
+      "roi_xy": null,
+      "page": 9,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9151,
+      "roi_origin": [
+        2739,
+        763
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "absent",
+      "roi_xy": null,
+      "page": 10,
+      "tile_origin": [
+        0,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9154,
+      "roi_origin": [
+        2739,
+        763
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "absent",
+      "roi_xy": null,
+      "page": 10,
+      "tile_origin": [
+        320,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9157,
+      "roi_origin": [
+        2739,
+        763
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2899.0,
+        923.0
+      ],
+      "page": 10,
+      "tile_origin": [
+        640,
+        0
+      ]
+    },
+    {
+      "frame_idx": 9160,
+      "roi_origin": [
+        2763,
+        766
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2923.0,
+        926.0
+      ],
+      "page": 10,
+      "tile_origin": [
+        0,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9163,
+      "roi_origin": [
+        2785,
+        770
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2945.0,
+        930.0
+      ],
+      "page": 10,
+      "tile_origin": [
+        320,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9166,
+      "roi_origin": [
+        2806,
+        773
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2966.0,
+        933.0
+      ],
+      "page": 10,
+      "tile_origin": [
+        640,
+        368
+      ]
+    },
+    {
+      "frame_idx": 9169,
+      "roi_origin": [
+        2828,
+        775
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        2988.0,
+        935.0
+      ],
+      "page": 10,
+      "tile_origin": [
+        0,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9172,
+      "roi_origin": [
+        2847,
+        777
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3007.0,
+        937.0
+      ],
+      "page": 10,
+      "tile_origin": [
+        320,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9175,
+      "roi_origin": [
+        2865,
+        779
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3025.0,
+        939.0
+      ],
+      "page": 10,
+      "tile_origin": [
+        640,
+        736
+      ]
+    },
+    {
+      "frame_idx": 9178,
+      "roi_origin": [
+        2884,
+        780
+      ],
+      "image_origin_in_tile": [
+        0,
+        48
+      ],
+      "scale": 1,
+      "status": "visible",
+      "roi_xy": [
+        3044.0,
+        940.0
+      ],
+      "page": 11,
+      "tile_origin": [
+        0,
+        0
+      ]
+    }
+  ],
+  "note": "Trajectory is a diagnostic overlay on the first frame, not proof of accuracy. Gaps are not connected."
+}

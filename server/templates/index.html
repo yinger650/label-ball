@@ -218,7 +218,7 @@ const STATES = [
   ['submitted', '待审', 'var(--vio)'],
   ['accepted', '已入库', 'var(--ok)'],
   ['need_human', '待人工修补', 'var(--bad)'],
-  ['archived', '已归档', 'var(--dim)'],
+  ['archived', '已移除', 'var(--dim)'],
 ];
 const STATE_MAP = Object.fromEntries(STATES.map(([k, label, color]) => [k, { label, color }]));
 
@@ -762,7 +762,7 @@ function renderStateBtns() {
 
 function prRow(p) {
   const st = STATE_MAP[p.state] || { label: p.state || '未知', color: 'var(--dim)' };
-  const by = p.source === 'ai' ? (p.model_used || p.worker) : (p.lease_worker || p.worker);
+  const by = p.method_tag || (p.source === 'ai' ? (p.model_used || p.worker) : (p.lease_worker || p.worker));
   return `<tr>
     <td class="pid">${esc(p.packet_id)}
       <div class="hint">${esc(p.sampling || '')} · ${fmtBytes(p.size_bytes)}</div></td>
@@ -813,7 +813,7 @@ function pkRow(p) {
     ? `<span class="tag" style="border-color:${p.source === 'ai' ? 'var(--acc)' : 'var(--warn)'};
         color:${p.source === 'ai' ? 'var(--acc)' : 'var(--warn)'}">${p.source === 'ai' ? 'AI' : '人工'}</span>`
     : '<span class="dim">—</span>';
-  const by = p.source === 'ai' ? (p.model_used || p.worker) : p.worker;
+  const by = p.method_tag || (p.source === 'ai' ? (p.model_used || p.worker) : p.worker);
 
   const flags = Array.isArray(p.qc_flags) ? p.qc_flags : [];
   const qc = flags.length

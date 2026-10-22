@@ -55,8 +55,10 @@ class FakeAPI(ServerClient):
         self.heartbeats: List[str] = []
         self.lease_calls = 0
 
-    def lease(self, worker: str = "", kind: str = "ai") -> Optional[Lease]:
+    def lease(self, worker: str = "", kind: str = "ai", packet_id: str = "",
+              method: Optional[Dict[str, str]] = None) -> Optional[Lease]:
         self.lease_calls += 1
+        self.lease_method = dict(method or {})
         return self._lease
 
     def heartbeat(self, lease_id: str, stage: Optional[str] = None) -> dict:
@@ -77,6 +79,7 @@ class FakeAPI(ServerClient):
             "source": kw.get("source"),
             "lease_id": kw.get("lease_id"),
             "worker": kw.get("worker"),
+            "method": kw.get("method"),
         })
         return {"ok": True, "submission_id": 7, "n_labeled": len(result.get("labels") or [])}
 
@@ -130,6 +133,7 @@ def _session(tmp: Path, api: FakeAPI, **kw) -> AgentSession:
         hb_interval=3600.0,
         fetch_fn=lambda **k: Path(k["dest"]),
         prepare_fn=lambda *a, **k: load_prepared(tmp, k.get("packet_id") or PACKET),
+        method={"harness": "smoke", "harness_version": "0", "model": "fake", "model_version": "1"},
         **kw,
     )
 

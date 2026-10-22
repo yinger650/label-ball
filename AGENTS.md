@@ -38,10 +38,10 @@ Agent 来不及收口时，看板约 30 分钟无新日志会把该 Run 标成 *
 `skills/ball-label/SKILL.md`，按里面的流程干活，不要自己发明流程。
 
 - 只标比赛中正在使用的那一个球；场边备用球不标。球**可以是静止的**。
-- 冷启动：`ball_overview` 看人 + `ball_scan` 读轨迹。之后主力是
-  `ball_strip`（240–480 px，要看得见人）+ `ball_nominate`，不要用 80/45 小窗当主视野。
-- 平直段隔 2–3 帧提名，踢球/落地才密标。本地 `ball_fit` → `ball_follow` → `ball_commit`。
-- 只回答格子号（如 `C3`）。看不见就 `ball_absent`。
-- `ball_submit` 走 `source=ai` **进审核**，必须过本地 verify 门。不再免审入库。
+- 冷启动 `ball_overview` 看人 + `ball_scan` 读轨迹；主力用 240–480 px 带球员上下文图。
+- 默认直接 ROI 球心坐标，用 `ball_label(roi_xy=[x,y])`，格子仅辅助定位。看不见就 `ball_absent`。
+- 读取已保存 labels 画逐帧叠加与轨迹连线，视觉复核后修正；conf/verify 仅参考，不按分数拦截。
+- `ball_submit(visual_reviewed=true)` 走 `source=ai` 进审核，仍要求标满。试验残包保存结果后 release。
+- `ball_lease` 要带 `harness` / `harness_version` / `model` / `model_version`（真实值），缺了领不到包。被「重标」的包同一方法领不到。
 - 冷启动找不到球就 `ball_release`，别硬标。
-- Codex 不读 `skills/`，本段 + `~/.codex/config.toml` 才是触发面，见 `skills/ball-label/adapters/codex.md`。
+- Codex skill 安装链接、项目规则与 MCP 配置见 `skills/ball-label/adapters/codex.md`。

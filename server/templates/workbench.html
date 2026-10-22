@@ -77,13 +77,15 @@
   <span class="pill" id="srcPill"></span>
   <span class="pill" id="progress"></span>
   <span class="grow"></span>
-  <button id="bInvisible">本帧不可见 X</button>
-  <button id="bClear">清除 U</button>
-  <button id="bRangeClear">本段清除标注</button>
-  <button id="bRangeInvis">本段不可见</button>
-  <button class="primary" id="bSubmit">提交</button>
-  <button class="bad" id="bAbandon">抛弃本包</button>
-  <a class="btn" href="/">列表</a>
+  <span id="labelBtns">
+    <button class="primary" id="bSubmit">提交 S</button>
+    <button class="bad" id="bAbandon">移除本包</button>
+  </span>
+  <span id="revBtns" style="display:none">
+    <button class="primary" id="bDecide">提交 S</button>
+    <button class="bad" id="bRemove">移除该数据</button>
+  </span>
+  <a class="btn" id="bList" href="/">列表</a>
 </div>
 <div id="enhbar"></div>
 <div id="warnbar"></div>
@@ -104,19 +106,29 @@
       <button id="bSlower">−</button>
       <button id="bFaster">=</button>
       <button id="bPane">滤波图 W</button>
+      <button id="bScan" style="display:none">Scan E</button>
       <button id="bMode">固定区域 F</button>
       <button id="bLoop" class="on">循环</button>
       <button id="bPing">摆动</button>
       <button id="bIn">标记头 [</button>
       <button id="bOut">标记尾 ]</button>
-      <button id="bClrRange">全段 \</button>
+      <button id="bClrRange">取消选段 \</button>
+      <button id="bSelAll" style="display:none">全段选取 A</button>
+      <span id="labelMarks">
+        <button id="bClear">清除标注 U</button>
+        <button id="bInvisible">标不可见 X</button>
+      </span>
+      <span id="revMarks" style="display:none">
+        <button class="good" id="bMarkOk">标记正确 O</button>
+        <button class="bad" id="bMarkBad">标记错误 X</button>
+      </span>
       <button id="bSus">可疑 J/K</button>
       <span class="grow" style="flex:1"></span>
       <button id="bDownload">下载到本地以便修正</button>
     </div>
   </div>
   <div id="side">
-    <h3>局部放大（点选修正）</h3>
+    <h3 id="zoomTitle">局部放大（点选修正）</h3>
     <div id="zoom"><canvas id="player" width="256" height="256"></canvas></div>
     <h3>Scan 总览（点图跳帧）</h3>
     <canvas id="scan" style="width:100%;background:#0b0d11;border:1px solid var(--line);border-radius:6px;cursor:crosshair"></canvas>
@@ -124,26 +136,48 @@
     <canvas id="chart" height="180"></canvas>
     <h3>当前帧</h3>
     <div class="kv" id="kv"></div>
+    <div id="revSide" style="display:none">
+      <h3>裁决</h3>
+      <div id="decInfo" style="font-size:12px;color:var(--dim);margin-bottom:6px"></div>
+      <textarea id="notes" placeholder="备注（可选）"
+                style="width:100%;height:54px;resize:vertical;background:#0f1115;color:var(--fg);
+                       border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit"></textarea>
+      <div style="font-size:12px;color:var(--dim);line-height:1.8;margin-top:4px">
+        通过：整包入库 · 有错误帧：错误帧进人工修复，修完直接入库<br>
+        重标：回待领取池，同一 harness+模型不能再领 · 移除：数据本身有问题，不再标注
+      </div>
+    </div>
+    <h3>包信息</h3>
+    <div class="kv" id="pkInfo"></div>
     <h3>色条图例</h3>
     <div class="legend">
-      <span><i style="background:#4ade80"></i>已标</span>
-      <span><i style="background:#fbbf24"></i>将插值 / 插值</span>
-      <span><i style="background:#3d4450"></i>未标</span>
-      <span><i style="background:#5b6270"></i>不可见</span>
-      <span><i style="background:#0f1115;border:1px solid #f87171"></i>已打回</span>
+      <span><i style="background:#4b5563"></i>未标注</span>
+      <span><i style="background:#4ade80"></i>标注有球</span>
+      <span><i style="background:#fbbf24"></i>插值</span>
+      <span><i style="background:#f97316"></i>不可见</span>
+      <span><i style="background:#0f1115;border:1px solid #f87171"></i>错误帧（红框）</span>
     </div>
     <h3>键位</h3>
-    <div style="font-size:12px;color:var(--dim);line-height:2">
+    <div id="revKeys" style="display:none;font-size:12px;color:var(--dim);line-height:2">
+      <kbd>空格</kbd> 播放 · <kbd>,</kbd><kbd>.</kbd> 拨帧 · <kbd>W</kbd> 原图/滤波 · <kbd>E</kbd> Scan<br>
+      <kbd>J</kbd><kbd>K</kbd> 下一个/上一个可疑帧<br>
+      默认单帧 · <kbd>[</kbd><kbd>]</kbd> 选段头尾 · <kbd>A</kbd> 全段选取 · <kbd>\</kbd> 取消选段<br>
+      <kbd>O</kbd> 标记正确 · <kbd>X</kbd> 标记错误（作用于当前单帧或已选段）<br>
+      <kbd>S</kbd> 提交 · <kbd>R</kbd> 重载<br>
+      提交结果：没有错误帧 = 通过入库 · 部分错误 = 部分人工修复（错误帧进修复，修完直接入库）<br>
+      全部错误 = 重标（回待领取池，同一 harness+模型 / 同一标注员不能再领）· 移除该数据 = 数据本身有问题
+    </div>
+    <div id="labelKeys" style="font-size:12px;color:var(--dim);line-height:2">
       局部窗左键点球心修正 · 右键拖 · 滚轮缩放 · 点 Scan 跳帧<br>
       <kbd>空格</kbd> 播放 · <kbd>,</kbd><kbd>.</kbd> 拨帧 · <kbd>W</kbd> 原图/滤波<br>
-      <kbd>X</kbd> 不可见 · <kbd>U</kbd> 清除 · <kbd>S</kbd> 提交<br>
-      <kbd>[</kbd><kbd>]</kbd> 只圈选范围（不记点）· <kbd>D</kbd> 本段清除红叉和旧点<br>
+      默认单帧 · <kbd>[</kbd><kbd>]</kbd> 选段头尾 · <kbd>A</kbd> 全段选取 · <kbd>\</kbd> 取消选段<br>
+      <kbd>U</kbd> 清除标注 · <kbd>X</kbd> 标不可见（作用于当前单帧或已选段）· <kbd>S</kbd> 提交<br>
       球不动：在画面上点头尾两帧球心，全图会画出插值轨迹，再提交看审核回放<br>
-      预选框默认跟上帧。没有球：本段不可见再提交。质量不行才抛弃。
+      预选框默认跟上帧。没有球：选中后标不可见再提交。数据质量不行才移除。
     </div>
   </div>
 </div>
-<script src="/static/js/gtplayer.js?v=20260916scan"></script>
-<script src="/static/js/workbench.js?v=20260914e"></script>
+<script src="/static/js/gtplayer.js?v=20261020xmark"></script>
+<script src="/static/js/workbench.js?v=20261020nolocal"></script>
 </body>
 </html>

@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-DEFAULT_ENDPOINT = "http://aoss-internal.cn-sh-01b.sensecoreapi-oss.cn"
+DEFAULT_ENDPOINT = "https://aoss-external.cn-sh-01b.sensecoreapi-oss.cn"
 DEFAULT_BUCKET = "wangmin"
 DEFAULT_PREFIX = "ball_det/"
 # 领取多久无结果就视为放弃，重新放回池子
@@ -79,14 +79,59 @@ def _from_aoss_conf(path: Path) -> Optional[Credentials]:
     )
 
 
+def _read_dotenv(path: Path) -> Dict[str, str]:
+    """读取项目 `.env` 中的 AOSS 配置，不修改进程环境。"""
+    keys = {
+        "AOSS_ENDPOINT", "AOSS_ACCESS_KEY", "AOSS_SECRET_KEY",
+        "AOSS_BUCKET", "AOSS_PREFIX",
+    }
+    if not path.exists():
+        return {}
+    out: Dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, sep, value = line.partition("=")
+        if sep and key.strip() in keys:
+            out[key.strip()] = value.strip().strip("\"'")
+    return out
+
+
+def _from_env(values: Dict[str, str], source: str) -> Optional[Credentials]:
+    access_key = values.get("AOSS_ACCESS_KEY", "")
+    secret_key = values.get("AOSS_SECRET_KEY", "")
+    if not access_key or not secret_key:
+        return None
+    return Credentials(
+        endpoint=values.get("AOSS_ENDPOINT") or DEFAULT_ENDPOINT,
+        access_key=access_key,
+        secret_key=secret_key,
+        bucket=values.get("AOSS_BUCKET") or DEFAULT_BUCKET,
+        prefix=values.get("AOSS_PREFIX") or DEFAULT_PREFIX,
+        source=source,
+    )
+
+
 def load_credentials(explicit: Optional[str] = None) -> Credentials:
-    """按优先级查找凭证：显式路径 → 环境变量 → 工具目录 → 家目录 → aoss.conf。"""
+    """按优先级查找凭证：显式路径 → 环境变量 → 项目 .env → 凭证文件 → aoss.conf。"""
     candidates: List[Path] = []
     if explicit:
         candidates.append(Path(explicit))
     if os.environ.get("BALL_GT_CREDENTIALS"):
         candidates.append(Path(os.environ["BALL_GT_CREDENTIALS"]))
     here = Path(__file__).resolve().parent
+    process_env = {key: os.environ[key] for key in (
+        "AOSS_ENDPOINT", "AOSS_ACCESS_KEY", "AOSS_SECRET_KEY", "AOSS_BUCKET", "AOSS_PREFIX",
+    ) if os.environ.get(key)}
+    cred = _from_env(process_env, "environment")
+    if cred:
+        return cred
+    cred = _from_env(_read_dotenv(here / ".env"), str(here / ".env"))
+    if cred:
+        return cred
     candidates += [
         here / "credentials.json",
         Path.home() / ".ball_gt_credentials.json",

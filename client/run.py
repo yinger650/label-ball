@@ -257,6 +257,42 @@ class RunConfig:
     track_fn: Optional[Callable] = None
     bundle_fn: Optional[Callable] = None  # 已废弃，忽略
     cleanup: bool = True
+    # harness / harness_version / model / model_version；None 时按工作流和主力供应商推
+    method: Optional[Dict[str, str]] = None
+
+
+RUN_HARNESS = "label-ball-run"
+
+
+def _git_rev() -> str:
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=str(Path(__file__).resolve().parents[1]),
+            capture_output=True, text=True, timeout=5,
+        )
+        return out.stdout.strip() or "dev"
+    except Exception:  # noqa: BLE001
+        return "dev"
+
+
+def default_run_method(workflow: str, model: str = "", model_version: str = "") -> Dict[str, str]:
+    """本客户端的标注方法：harness=label-ball-run，版本=工作流@git 提交，模型=主力供应商的模型名。"""
+    if not model:
+        try:
+            from client.vlm import VlmPool
+            pool = VlmPool(use_cache=False)
+            chain = pool.chain("primary")
+            if chain:
+                model = pool.cfgs[chain[0]].model or chain[0]
+        except Exception as e:  # noqa: BLE001
+            log.warning("推不出主力模型名: %s", e)
+    return {
+        "harness": RUN_HARNESS,
+        "harness_version": f"{workflow}@{_git_rev()}",
+        "model": model or "unknown-vlm",
+        "model_version": model_version,
+    }
 
 
 def _default_workflow(prep, seed, frames=None, **kw):
@@ -370,7 +406,7 @@ def process_lease(cfg: RunConfig, lease: Lease) -> str:
         resp = cfg.api.submit(
             result, None,
             source="ai", lease_id=lease.lease_id, worker=cfg.worker,
-            workflow=wf_name, model_used=model_used,
+            workflow=wf_name, model_used=model_used, method=cfg.method,
         )
         log.info("%s 已提交 submission_id=%s n_labeled=%s",
                  pid, (resp or {}).get("submission_id"), len(labels))
@@ -388,11 +424,14 @@ def run_loop(cfg: RunConfig, *, once: bool = False, max_packets: int = 0,
     """主循环。返回处理成功的包数。失败自动 release 并换包。"""
     n_ok = 0
     n_seen = 0
+    if cfg.method is None and cfg.kind == "ai":
+        cfg.method = default_run_method(cfg.workflow)
+        log.info("标注方法 %s", cfg.method)
     while True:
         if max_packets and n_seen >= max_packets:
             break
         try:
-            lease = cfg.api.lease(cfg.worker, cfg.kind)
+            lease = cfg.api.lease(cfg.worker, cfg.kind, method=cfg.method)
         except Exception as e:  # noqa: BLE001
             log.error("lease 失败: %s", e)
             if once:
@@ -445,6 +484,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--idle", type=float, default=15.0, help="池空时等待秒数")
     p.add_argument("--keep-work", action="store_true", help="提交后保留本地工作区")
     p.add_argument("--hb-interval", type=float, default=60.0)
+    p.add_argument("--model", default="", help="记进 AI 标记的模型名，默认取主力供应商的模型")
+    p.add_argument("--model-version", default="")
     return p.parse_args(argv)
 
 
@@ -471,6 +512,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         allow_cold_start=a.allow_cold_start,
         keep_work=a.keep_work,
         hb_interval=a.hb_interval,
+        method=default_run_method(a.workflow, a.model, a.model_version) if a.kind == "ai" else None,
     )
     n = run_loop(cfg, once=a.once, max_packets=a.max_packets, idle_sec=a.idle)
     log.info("结束，成功 %d 包", n)

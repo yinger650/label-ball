@@ -1,72 +1,47 @@
 ---
 name: ball-label
-description: Annotate the match ball in 8K ERP panorama packets via the ball-label MCP server (lease → plan → overview/scan → strip+nominate → fit → commit → submit). Use when asked to label football GT, claim a packet, or act as an annotator for label-ball.
-homepage: https://ballgt.yinger650.com
+description: Annotate the match ball in 8K ERP panorama packets via the ball-label MCP server using direct coordinates and visual review of saved labels and trajectory lines. Use when asked to label football GT, claim a packet, or act as an annotator for label-ball.
 metadata: {"mcp": {"server": "ball-label", "requires": {"bins": ["python3"]}, "primaryEnv": "BALL_GT_API_TOKEN"}}
 ---
 
-# 足球 GT 标注（agent 当标注员）
+# 足球 GT 标注：直接坐标 + 标后视觉复核
 
-8K ERP 全景视频，每帧最多**一个**目标：比赛中正在使用的那颗球。球只有 **8–30 px**（中位约 18 px）。
+只标比赛正在使用的一个球，静止球也要标。场边备用球不标。先看球员和比赛动作，再判断球；以 RGB 为主，DoG/scan 只辅助搜索。
 
-你通过 MCP 工具干活。工具清单见 `references/tools.md`。
+## 工作流
 
-## 硬约束
+1. `ball_lease` → `ball_status` 等 ready → `ball_plan`。携带真实 harness、模型及版本；未暴露的快照明确记 unknown/undisclosed，不编造日期。
+2. 冷启动 `ball_overview` 看人，`ball_scan(kind="time")` 看运动。找不到比赛球则 `ball_release(reason="cannot_locate")`。
+3. 用 `ball_strip(size=240–480)` 或下述 1:1 坐标视图观察连续帧，保留球员上下文。格子可用来找区域，最终位置直接给球心 ROI 坐标。
+4. `ball_label(packet_id, frame_idx, roi_xy=[x,y])` 写入。拖影取中间，逐帧设置 `blurred` / `occluded`。看不见用 `ball_absent`；未查看的帧留空，不得当不可见。
+5. 读取实际保存的 labels 生成叠加图和连线图，逐帧核对标记是否落在球上、是否误标球鞋/白线/备用球，连线是否符合传球、踢球和落地动作。错误用 `ball_label` 覆盖，再出图复核。
+6. 整包完成且已视觉复核后，`ball_submit(visual_reviewed=true)`，仍以 `source=ai` 进入审核。缺帧仍拒绝；不要用 `force=true` 交残包。试验只做部分帧时保存结果并 release，明确报告覆盖范围。
 
-1. **只标比赛中正在使用的那一个球。** 场边 / 球门后 / 看台备用球不标。
-2. **主力窗必须装得下人（240–480 px）。** 不要用 80 / 45 px 小窗当主视野——人眼标注全程看的是球周边人的动作。精修可以再收，但判断依据是带人的上下文图。
-3. **看不见就 `ball_absent`。猜错的坐标比空缺更有害。**
-4. **只回答格子号**（如 `C3`）。不要自己换算像素。
-5. **球可以是静止的。** 约 20% 的包全程移动 ≤7 px。不要因为没在动就说没有球。
-6. **`ball_submit` 走 `source=ai` 进审核**，不再免审入库。可见点必须过本地 verify 门。
-7. **冷启动找不到球就 `ball_release`，别硬标。**
+默认不按 `conf` 或 `verify.score` 决定取舍，也不以过门率衡量准确率。verify 是启发式诊断，不是 GT。`ball_nominate → ball_fit → ball_commit` 是保留的旧路线；默认直接写坐标，避免旧路线的分数筛选和插值过滤改变视觉答案。轨迹平滑也不是正确性的证明，停球、转向和遮挡可以造成真实变化。
 
-## 怎么认球
+## 坐标视图与标后复核
 
-- **先看人，再找球。** 谁在控球、谁要踢球、球是不是停在脚下。这是定位依据，不是干扰物清单。
-- **以 RGB 为主。** 滤波图（DoG）只能缩小范围；球附近通常还有好几个同样尺度的白斑（脚、边线、高光），不要按「孤立白斑」去挑。
-- 球是拖影时取中间。精度点球心，2–3 px 内够用。
-
-## 一包怎么走
-
-调用预算不要均摊到 100 帧。平直段 / 静止段隔 2–3 个目标帧提名，线性插值中位 3–4 px；踢球 / 落地（加速度大）才逐帧密标。
-
-```
-ball_lease → ball_status 等到 ready
-  → ball_plan                         # 每帧状态 + query_frames + 下一步
-  → 冷启动（只做一次）：
-       ball_overview 看人
-       ball_scan(kind="time") 读轨迹带（早蓝晚红）
-  → 对 query_frames：
-       ball_strip(center, size=240 或 480) → 答 0–3 个格子
-       ball_nominate(view_id, cells)      → 看 verify 明细
-  → ball_fit → ball_follow 复核
-  → ball_commit（过门才写入；被拒的帧不要硬写）
-  → 看不见的帧 ball_absent
-  → ball_submit                         # source=ai，进审核
-```
-
-视频路线（`scripts/probe_video.py` 测通之后）用 `ball_video`：按目标帧重编 1 fps，第 t 秒 = 第 t 个目标帧；高 ROI 要裁块（约 1008×1008），不要丢一张 4016 宽的全景。
-
-旧工具还在：`ball_frames` / `ball_view` / `ball_view_image` / `ball_label`。新流程优先 plan / strip / nominate / fit / commit。
-
-`ball_view` 的 `time_grid` 默认每格 **240 px**（不是 160）。`ball_strip` 默认 **6×6**；旧 `ball_view` crop 默认仍是 8×8。
-
-## 安装 / 启动
+在仓库根用 `venv/bin/python` 执行（其他位置请使用绝对路径）：
 
 ```bash
-bash skills/ball-label/install.sh
-<repo>/venv/bin/python -m client.mcp_server \
-  --server https://ballgt.yinger650.com --worker <你的名字>
+# 未标注原图，固定窗，1 个输出像素 = 1 个 ROI 像素；一页最多九帧
+venv/bin/python skills/ball-label/scripts/coordinate_review.py view PACKET \
+  --frames FRAME1 FRAME2 FRAME3 --center X Y --size 320 --out /tmp/ball-view
+
+# 从保存的 labels 生成每帧圆圈叠加图和轨迹连线图；不按分数筛选
+venv/bin/python skills/ball-label/scripts/coordinate_review.py review PACKET \
+  --frames FRAME1 FRAME2 FRAME3 --out /tmp/ball-review
 ```
 
-Codex **不读 `skills/`**，要靠项目根 `AGENTS.md` + `~/.codex/config.toml`，见 `adapters/codex.md`。
+可传 `--work` 指定 MCP 的同一工作目录，默认 `~/.cache/ball_ai/work`。
+每页原图上方有 48 px 标题，`manifest.json` 给出每块的 `tile_origin`、`image_origin_in_tile`、`roi_origin` 和 `scale=1`。从原图局部坐标加 `roi_origin` 得到 ROI 坐标；不要把页面坐标或标题偏移直接当答案。图若被查看器缩放，要用原始尺寸查看或按已知比例还原。全景接缝由 `ball_label` 负责转换，不手算 pano 坐标。
 
-凭证不进 MCP 配置：AOSS 走既有查找顺序；写接口 `--token` / `BALL_GT_API_TOKEN` / 仓库 `.env`。
+review 不给 `--frames` 时查看所有本地已标帧，**不代表未标帧已复核**。连线只连接相邻目标帧；缺帧/不可见处断开。每帧叠加图必须逐页看，连线总览不能代替逐帧确认。
 
-## 相关
+平直段可先隔 2–3 个目标帧定位轨迹，再补看其余帧；踢球/落地段密看。插值只帮助寻找，不能把未观察的点作为最终答案。
 
-- `references/tools.md`：工具参数
-- `docs/agent-annotator.md`：会话示例
-- `标注员使用说明.md`：人工口径
-- `.cursor/plans/球标注v3全局轨迹_b2e5a619.plan.md`：窗口 / 采样 / 视频阶梯
+## 工具与安装
+
+工具参数见 [references/tools.md](references/tools.md)。MCP 配置见 [adapters/codex.md](adapters/codex.md)。Codex 用户 skill 可通过 `~/.codex/skills/ball-label` 链接到本目录；项目触发规则在 `AGENTS.md`。
+
+凭证不进 MCP 配置：写接口读 `BALL_GT_API_TOKEN` 或仓库 `.env`；AOSS 走既有凭证查找顺序。

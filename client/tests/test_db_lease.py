@@ -148,7 +148,7 @@ def test_status_recall_and_delete():
         assert listed["busy"]["lease_worker"] == "alice"
         assert listed["waiting"]["status_text"] == "bob 标注完，待审核"
         assert listed["done"]["status_text"] == "dave 已完成审核入库"
-        assert listed["part"]["status_text"] == "eve 部分通过，剩余 2 帧待重标"
+        assert listed["part"]["status_text"] == "eve 部分通过，2 帧待人工修复"
         assert listed["fresh"]["status_text"] == "待领取"
         order = [p["packet_id"] for p in db.list_packets(c, order="produced")["packets"]]
         assert order.index("done") < order.index("fresh"), order
@@ -170,8 +170,98 @@ def test_status_recall_and_delete():
         c.close()
 
 
+CODEX = {"harness": "codex", "harness_version": "0.48", "model": "gpt-6-astra", "model_version": "2026-09"}
+DSH = {"harness": "dsh", "harness_version": "0.4.1", "model": "glm-5.3-flash", "model_version": ""}
+
+
+def _ai_sub(c, pid, info, labels):
+    method = db.method_key("ai", "agent", info)
+    cur = c.execute(
+        "INSERT INTO submissions(packet_id, worker, source, labels_json, n_targets, n_labeled, state, "
+        "created_at, harness, harness_version, model, model_version, method) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (pid, "agent", "ai", db.jdump(labels), len(labels), len(labels), "pending", db.now(),
+         info["harness"], info["harness_version"], info["model"], info["model_version"], method),
+    )
+    c.execute("UPDATE packets SET state='submitted' WHERE packet_id=?", (pid,))
+    c.commit()
+    return int(cur.lastrowid)
+
+
+LABELS = [{"frame_idx": f, "visible": True, "pano_x": 100.0 + f, "pano_y": 50.0} for f in (1, 2, 3)]
+
+
+def test_method_key_and_tag():
+    assert db.method_key("ai", "x", CODEX) == "ai:codex@0.48|gpt-6-astra@2026-09"
+    assert db.method_key("ai", "x", {"model": "m"}) == db.UNKNOWN_AI_METHOD
+    assert db.method_key("human", "alice") == "human:alice"
+    assert db.method_tag("ai", "x", CODEX, "2026-10-20") == "codex 0.48 · gpt-6-astra 2026-09 · 2026-10-20"
+
+
+def test_relabel_blocks_same_method_only():
+    with tempfile.TemporaryDirectory() as td:
+        c = db.connect(Path(td) / "t.sqlite3")
+        db.migrate(c)
+        _pkt(c, "p1")
+        sid = _ai_sub(c, "p1", CODEX, LABELS)
+        out = db.review_submission(c, sid, "reject", reviewer="rv")
+        assert out["decision"] == "relabel" and out["packet_state"] == "available", out
+        assert int(db.scalar(c, "SELECT COUNT(*) FROM gt WHERE packet_id='p1'")) == 0
+        codex = db.method_key("ai", "agent", CODEX)
+        assert out["blocked_methods"] == [codex]
+
+        assert db.pick_packet(c, "ai-2", "ai", method=codex) is None
+        assert db.pick_packet(c, "ai-2", "ai", want_packet="p1", method=codex) is None
+        assert db.pick_packet(c, "ai-2", "ai", method=db.UNKNOWN_AI_METHOD) is None
+        got = db.pick_packet(c, "ai-2", "ai", method=db.method_key("ai", "agent", DSH))
+        assert got and got["packet_id"] == "p1"
+        got = db.pick_packet(c, "bob", "human", method="human:bob")
+        assert got and got["packet_id"] == "p1"
+
+        listed = {p["packet_id"]: p for p in db.list_packets(c)["packets"]}
+        assert listed["p1"]["status_text"].startswith("待重标"), listed["p1"]["status_text"]
+        c.close()
+
+
+def test_accept_repair_remove():
+    with tempfile.TemporaryDirectory() as td:
+        c = db.connect(Path(td) / "t.sqlite3")
+        db.migrate(c)
+        db.register_packet(c, "g__s__0010_0020", "k", {"targets": [1, 2, 3], "group": "g", "stem": "s",
+                                                      "produced_at": "2026-10-01T08:00:00+00:00"})
+        _pkt(c, "ok")
+        _pkt(c, "fix")
+
+        sid = _ai_sub(c, "ok", CODEX, LABELS)
+        out = db.review_submission(c, sid, "accept", reviewer="rv")
+        assert out["packet_state"] == "accepted" and out["n_gt_written"] == 3
+
+        sid = _ai_sub(c, "fix", CODEX, LABELS)
+        out = db.review_submission(c, sid, "repair", reviewer="rv", frames={"2": False, "3": True})
+        assert out["packet_state"] == "need_human" and out["n_rejected"] == 1, out
+        row = db.one(c, "SELECT need_frames_json FROM packets WHERE packet_id='fix'")
+        assert db.jload(row["need_frames_json"]) == [2]
+        assert int(db.scalar(c, "SELECT COUNT(*) FROM gt WHERE packet_id='fix'")) == 2
+        assert db.pick_packet(c, "carol", "repair")["packet_id"] == "fix"
+
+        sid = _ai_sub(c, "g__s__0010_0020", CODEX, LABELS)
+        out = db.review_submission(c, sid, "remove", reviewer="rv", reason="画面花屏",
+                                   ban_source_video=True)
+        assert out["packet_state"] == "archived" and out["banned_video"] == "g__s", out
+        p = db.one(c, "SELECT * FROM packets WHERE packet_id='g__s__0010_0020'")
+        assert p["state"] == "archived" and p["removed_reason"] == "画面花屏" and p["removed_by"] == "rv"
+        assert p["produced_at"] and p["produced_at"] < db.now()
+        assert db.one(c, "SELECT state FROM submissions WHERE submission_id=?", (sid,))["state"] == "rejected"
+        bl = db.blocklist(c)
+        assert bl["video_keys"] == ["g__s"] and "g__s__0010_0020" in bl["packets"], bl
+        c.close()
+
+
 if __name__ == "__main__":
     test_want_packet_and_seed_priority()
     test_requeue_need_human_to_available()
     test_status_recall_and_delete()
+    test_method_key_and_tag()
+    test_relabel_blocks_same_method_only()
+    test_accept_repair_remove()
     print("ok db_lease")

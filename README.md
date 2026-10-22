@@ -63,10 +63,12 @@ python3 -m venv venv
 |---|---|---|
 | `--host` | `127.0.0.1` | 公网部署由 nginx 反代 |
 | `--port` | `8780` | |
-| `--db` | `~/ball_gt_work/ball_gt.sqlite3`（或 `BALL_GT_DB`） | SQLite |
-| `--bundles` | `<db 同级>/bundles` | 审核包解包目录 |
+| `--db` | `$BALL_GT_WORK/ball_gt.sqlite3`（或 `BALL_GT_DB`） | SQLite；`BALL_GT_WORK` 默认 `~/ball_gt_work` |
+| `--bundles` | `<db 同级>/thumbs`（或 `BALL_GT_BUNDLES`） | 审核包解包目录 |
 | `--keep-available` | `40` | 产包端 `want_more` 的目标待领数 |
 | `--batch` | `10` | 单轮补包上限 |
+
+本地调试要线上数据时跑 `./scripts/pull_server_data.sh`：从 `TencentCloud_6M:/var/lib/ball_gt` 拉库快照和审核包到 `$BALL_GT_WORK`，默认跳过 3.3G 的预览 mp4（`BALL_GT_PULL_VIDEO=1` 才拉）。先停本地服务端再拉。
 
 可选：设 `BALL_GT_API_TOKEN` 后，写接口要带 `X-Api-Token`。读接口和看板不校验。进程启动时会打印「不持有 AOSS / ACP 凭证」。
 
@@ -120,7 +122,7 @@ python3 -m venv venv
 
 快捷键与原来相同，见 [标注员使用说明.md](标注员使用说明.md)。
 
-AOSS 凭证查找顺序见 `aoss_store.load_credentials`：`BALL_GT_CREDENTIALS` → 仓库 `credentials.json` → `~/.ball_gt_credentials.json` → `/mnt/afs/wangmin/aoss.conf` 的 `tetrasvideo`（endpoint 会改到 cn-sh-01b）。
+AOSS 凭证查找顺序见 `aoss_store.load_credentials`：显式 `BALL_GT_CREDENTIALS` 文件 → 环境变量 → 仓库 `.env` → 仓库 `credentials.json` → `~/.ball_gt_credentials.json` → `/mnt/afs/wangmin/aoss.conf` 的 `tetrasvideo`。本项目 `.env` 使用 `AOSS_ENDPOINT`、`AOSS_ACCESS_KEY`、`AOSS_SECRET_KEY`、`AOSS_BUCKET`、`AOSS_PREFIX`；当前端点是 `https://aoss-external.cn-sh-01b.sensecoreapi-oss.cn`，bucket 与前缀为 `wangmin` / `ball_det/`。
 
 ---
 
@@ -179,8 +181,14 @@ AOSS 上已有、库里没有的包：
 
 - 人工提交直接写 `gt` 表（入库）。
 - AI 提交进 `submissions`（`pending`），带审核包：`follow.webp` / `follow_enh.webp` / `overview.webp` / `scene.webp` / `scene_enh.webp` / `region.webp` / `region_enh.webp` / `manifest.json`（`region*` 仅轨迹包围盒够小时才有。主画面原图只播 `scene` 全幅当前帧，不用局部格子顶替）。
-- 打开看板 https://ballgt.yinger650.com → `/review`，主体是沿轨迹播放器，不是平铺缩略图。默认跟随模式、12 fps；`W` 原图/滤波，`F` 跟随/固定区域，`Y`/`N` 整包通过/打回，`X` 打回当前帧，`S` 提交裁决。
-- 整包通过写入 `gt`；打回的帧把包置为 `need_human`，人工站修补模式领回去。
+- 打开看板 https://ballgt.yinger650.com → `/review` 是队列；点进去 `/review/<sid>` 和人工标注、修复是**同一个工作台**（`workbench.html` 审核模式）。`W` 原图/滤波，`F` 跟随/固定区域，`X` 标错误帧，`O`/`B` 本段正确/错误，`Y` 通过，`N` 重标，`S` 提交裁决。
+- 四种裁决（`POST /api/v2/review/<sid>`，`decision`）：
+  - `accept` 通过：整包写 `gt`。
+  - `repair` 部分人工修复：错误帧从 `gt` 删掉，其余入库，包转 `need_human`；人工修复提交后直接入库。
+  - `relabel` 重标：清空该包 `gt`，回 `available`，把这次提交的方法（`ai:{harness}@{版本}|{model}@{版本}` 或 `human:{worker}`）记进 `blocked_methods`，同一方法再也领不到。
+  - `remove` 移除：数据本身有问题，包 `archived` 并记原因；`ban_video=true` 时整路源视频进 `banned_videos`。产包端每轮拉 `GET /api/v2/blocklist`，跳过停用视频和已移除包的时间窗。
+  - 旧名 `reject` / `partial` 分别按 `relabel` / `repair` 处理。
+- AI 提交必须带 `harness` / `harness_version` / `model` / `model_version`，服务端加上日期生成标注标记 `method_tag`；包带生产日期 `produced_at`。
 
 从中心库导出训练 GT（取代对 AOSS `results/` 的 `collect_results.py`）：
 

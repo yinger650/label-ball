@@ -17,7 +17,7 @@ Server：`client/mcp_server.py`，标准库手写 stdio JSON-RPC 2.0（**不装 
 
 保留：`ball_lease` / `ball_status` / `ball_frames` / `ball_view` / `ball_view_image` / `ball_label` / `ball_submit` / `ball_release` / `ball_scan`。
 
-v3 新增（优先用这些）：
+直接坐标视觉复核流程优先 `ball_label(roi_xy)`，配合 skill 内的 coordinate_review.py。以下提名/拟合/commit 工具保留为旧路线，仍会使用分数过滤：
 
 | 工具 | 干什么 |
 |---|---|
@@ -35,14 +35,18 @@ v3 新增（优先用这些）：
 
 ---
 
-### `ball_lease(worker?, kind="human")`
+### `ball_lease(worker?, kind="human", harness?, harness_version?, model?, model_version?)`
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `worker` | 启动时的 `--worker` | 工人名，进 GT 记录 |
-| `kind` | `"human"` | `human` = 整包；`repair` = 只跳审核员打回的帧 |
+| `kind` | `"human"` | `human` = 整包（服务端按 AI 领包）；`repair` = 只跳审核员标的错误帧 |
+| `harness` / `harness_version` | 启动时的 `--harness` / `--harness-version` | 你跑在哪个 harness 上，如 `codex` / `0.46.0`、`cursor` / `2.1` |
+| `model` / `model_version` | 启动时的 `--model` / `--model-version` | 你自己的模型和版本，如 `gpt-5.6` / `2026-09` |
 
-返回 `packet_id`、目标帧数、`roi`、`step` 等元信息。**同时后台启动**：下载 artifacts + 解码（约 1–3 分钟），以及租约心跳线程。同一 worker 有未完成会话时直接接上，`resume: true`，不再向服务端要包。
+**harness 和 model 必须有**（启动参数或这里给），否则领包报错；服务端也拒收不带它们的 AI 提交。它们和日期一起写进标注标记（`codex 0.46.0 · gpt-5.6 2026-09 · 2026-10-20`）。审核员选「重标」后，同一 harness+版本+模型+版本 再也领不到这个包，换模型或换版本才行。
+
+返回 `packet_id`、目标帧数、`roi`、`step`、`produced_at`、`method`、`blocked_methods` 等元信息。**同时后台启动**：下载 artifacts + 解码（约 1–3 分钟），以及租约心跳线程。同一 worker 有未完成会话时直接接上，`resume: true`，不再向服务端要包。
 
 池子空返回 `leased: false`（**不是 error**），不要重试轰炸；`repair` 需要先有包被打回。
 
@@ -100,8 +104,8 @@ v3 新增（优先用这些）：
 
 | 参数 | 说明 |
 |---|---|
-| `view_id` + `cell` | **agent 该用的方式。**格心 → ROI → pano，走唯一权威通道。`cell` 必须来自**同一帧**的那张图，否则拒绝 |
-| `roi_xy` / `pano_xy` | 已经有精确坐标时的旁路（导入、修补初值）。agent 别自己算这个 |
+| `view_id` + `cell` | 可选粗定位方式。格心 → ROI → pano，走唯一权威通道。`cell` 必须来自**同一帧**的那张图，否则拒绝 |
+| `roi_xy` / `pano_xy` | 默认使用 roi_xy：根据带上下文原图读球心，按视图几何换算；pano_xy 用于已知全景坐标 |
 | `visible` | 看不见传 `false`，此时不要带坐标 |
 | `occluded` | 球被部分遮挡 |
 | `blurred` | 球糊成一条拖影 |
@@ -141,9 +145,9 @@ ROI 可以跨 ERP 接缝，`pano_x = (roi[0] + local_x) % pano_w` 已在 `prep.r
 
 按目标帧重编视频。第 t 秒 = 第 t 个目标帧。大文件走 Files API（`mm_file://`）。
 
-### `ball_submit(packet_id, force?)`
+### `ball_submit(packet_id, force?, visual_reviewed=false)`
 
-`build_result` + `submit(source="ai")` **进审核队列**，不再免审入库。可见点还要过本地 verify 门（gate=0.6）；过不了默认拒绝整包。目标帧没标满也拒绝。`force=true` 才放行。
+`build_result` + `submit(source="ai")` **进审核队列**，不再免审入库。默认保留旧 verify 门。已逐帧检查保存结果的叠加图及连线后，传 `visual_reviewed=true` 跳过分数门；仍检查缺帧和全不可见，并进入 AI 审核。不要用 `force=true` 代替视觉复核。
 
 ### `ball_release(packet_id, reason)`
 

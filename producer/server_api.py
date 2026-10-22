@@ -228,6 +228,10 @@ class ServerAPI:
     def producers(self) -> Optional[Dict[str, Any]]:
         return self.get("/api/v2/producers")
 
+    def blocklist(self) -> Optional[Dict[str, Any]]:
+        """停用视频（video_keys = group__stem）+ 已移除包。服务端不可达返回 None。"""
+        return self.get("/api/v2/blocklist")
+
     def get(self, path: str, **params: Any) -> Optional[Dict[str, Any]]:
         url = self.base + path
         if params:

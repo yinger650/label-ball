@@ -12,8 +12,17 @@
 WAL 是必须的：审核页在读、客户端在提交、产包端每几分钟一次心跳，默认的
 rollback journal 下写会阻塞读，审核页会卡住。WAL 让读写互不阻塞。
 
-「入库」的定义只有一处：`gt` 表里有行。人工 / agent 提交直接写进去，AI 提交必须先过审核。
-已入库的提交仍可再审；打回的帧从 `gt` 删掉，包转 `need_human`。
+「入库」的定义只有一处：`gt` 表里有行。人工提交（标注 / 修复）直接写进去，AI 提交必须先过审核。
+
+审核四种裁决（`review_submission`）：
+  - accept  通过：整包入库。
+  - repair  部分人工修复：审核员标的错误帧不入库，包转 `need_human`，人工修完提交直接入库。
+  - relabel 重标：清掉该包 GT，回 `available`，并把这次提交的「标注方法」记进
+            `packets.blocked_methods_json`，同一方法以后领不到这个包。
+  - remove  移除：数据本身有问题，归档、清 GT；可顺带把整路源视频记进 `banned_videos`，
+            产包端按 `blocklist()` 不再从它切包。
+
+「标注方法」见 `method_key`：AI 是 harness+版本+模型+版本，人工是 `human:<名字>`。
 """
 
 from __future__ import annotations
@@ -27,7 +36,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # 租约时长。AI 客户端跑一个包约几分钟到十几分钟，30 分钟够宽松，靠心跳续期；
 # 人工沿用旧系统的 CLAIM_TTL_SEC（36 小时），因为标注员会跨天做完一个包。
@@ -41,12 +50,21 @@ FAIL_COOLDOWN_SEC = 15 * 60
 PACKET_STATES = ("available", "leased", "submitted", "accepted", "need_human", "archived")
 LEASE_KINDS = ("ai", "human", "repair")
 SUBMISSION_STATES = ("pending", "accepted", "rejected", "partial")
+REVIEW_DECISIONS = ("accept", "repair", "relabel", "remove")
+# 旧审核页 / 旧脚本的叫法
+DECISION_ALIASES = {"reject": "relabel", "partial": "repair"}
+METHOD_FIELDS = ("harness", "harness_version", "model", "model_version")
+UNKNOWN_AI_METHOD = "ai:unknown"
 
 _LOCAL = threading.local()
 
 
+def work_root() -> Path:
+    return Path(os.environ.get("BALL_GT_WORK") or (Path.home() / "ball_gt_work")).expanduser()
+
+
 def default_db_path() -> Path:
-    return Path(os.environ.get("BALL_GT_DB") or (Path.home() / "ball_gt_work" / "ball_gt.sqlite3"))
+    return Path(os.environ.get("BALL_GT_DB") or (work_root() / "ball_gt.sqlite3"))
 
 
 # ---------------------------------------------------------------- 连接
@@ -284,6 +302,33 @@ def migrate(c: sqlite3.Connection) -> int:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         )
         have = 3
+    if have < 4:
+        _ensure_column(c, "packets", "blocked_methods_json", "TEXT")
+        _ensure_column(c, "packets", "removed_at", "REAL")
+        _ensure_column(c, "packets", "removed_by", "TEXT")
+        _ensure_column(c, "packets", "removed_reason", "TEXT")
+        _ensure_column(c, "leases", "method", "TEXT")
+        _ensure_column(c, "leases", "method_json", "TEXT")
+        for col in METHOD_FIELDS + ("label_date", "method", "method_tag"):
+            _ensure_column(c, "submissions", col, "TEXT")
+        c.execute(
+            "CREATE TABLE IF NOT EXISTS banned_videos ("
+            "  video_key  TEXT PRIMARY KEY,"
+            "  group_name TEXT,"
+            "  stem       TEXT,"
+            "  packet_id  TEXT,"
+            "  reason     TEXT,"
+            "  banned_by  TEXT,"
+            "  created_at REAL NOT NULL)"
+        )
+        c.execute("CREATE INDEX IF NOT EXISTS idx_sub_method ON submissions(method)")
+        # 老库里没写生产时间的包，用注册时间兜底，保证每个包都有生产日期
+        c.execute("UPDATE packets SET produced_at=created_at WHERE produced_at IS NULL")
+        c.execute(
+            "INSERT INTO schema_meta(key, value) VALUES('version', '4') "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        )
+        have = 4
     c.commit()
     return have
 
@@ -330,6 +375,79 @@ def scalar(c: sqlite3.Connection, sql: str, args: Sequence = (), default: Any = 
 
 def lease_ttl(kind: str) -> int:
     return {"ai": LEASE_TTL_AI, "human": LEASE_TTL_HUMAN, "repair": LEASE_TTL_REPAIR}.get(kind, LEASE_TTL_AI)
+
+
+# ---------------------------------------------------------------- 标注方法
+
+
+def method_info(d: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """从请求 / 结果里摘出 harness、harness_version、model、model_version（去空白，缺的不带）。"""
+    out: Dict[str, str] = {}
+    for k in METHOD_FIELDS:
+        v = str((d or {}).get(k) or "").strip()
+        if v:
+            out[k] = v
+    return out
+
+
+def method_key(source: str, worker: str = "", info: Optional[Dict[str, Any]] = None) -> str:
+    """重标拉黑用的方法标识。日期不算在内：同一套 harness+模型换一天再跑，结果不会变。
+
+    人工按人区分：一个人标的被打回重标，换个人来标是合理的。
+    """
+    if source == "human":
+        return f"human:{(worker or 'anonymous').strip()}"
+    m = method_info(info)
+    if not m.get("harness") or not m.get("model"):
+        return UNKNOWN_AI_METHOD
+    return "ai:{}@{}|{}@{}".format(
+        m["harness"], m.get("harness_version", ""), m["model"], m.get("model_version", ""),
+    ).lower()
+
+
+def method_tag(source: str, worker: str, info: Optional[Dict[str, Any]], label_date: str) -> str:
+    """给人看的标记：`codex 0.48 · gpt-6-astra 2026-09 · 2026-10-20`。"""
+    if source == "human":
+        return f"人工 {worker or 'anonymous'} · {label_date}"
+    m = method_info(info)
+    harness = " ".join(x for x in (m.get("harness"), m.get("harness_version")) if x) or "未知 harness"
+    model = " ".join(x for x in (m.get("model"), m.get("model_version")) if x) or "未知模型"
+    return f"{harness} · {model} · {label_date}"
+
+
+def today_str(t: Optional[float] = None) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(t if t is not None else now()))
+
+
+def submission_method(s: Dict[str, Any]) -> str:
+    """一条提交的方法标识。v4 之前的老提交没存，按 source / 模型名推一个。"""
+    if s.get("method"):
+        return str(s["method"])
+    if (s.get("source") or "") == "human":
+        return method_key("human", str(s.get("worker") or ""))
+    legacy = s.get("model_used") or s.get("workflow") or s.get("worker") or "unknown"
+    return f"ai:legacy|{legacy}".lower()
+
+
+def blocked_methods(p: Dict[str, Any]) -> List[str]:
+    v = jload(p.get("blocked_methods_json"), []) or []
+    return [str(x) for x in v] if isinstance(v, list) else []
+
+
+def method_blocked(p: Dict[str, Any], method: Optional[str]) -> bool:
+    """这个方法能不能领这个包。说不清自己是什么方法的 AI，不发任何被重标过的包。"""
+    if not method:
+        return False
+    blocked = blocked_methods(p)
+    if not blocked:
+        return False
+    if method == UNKNOWN_AI_METHOD:
+        return True
+    return method in blocked
+
+
+def video_key(group: Optional[str], stem: Optional[str]) -> str:
+    return f"{group or ''}__{stem or ''}"
 
 
 # ---------------------------------------------------------------- 包
@@ -438,6 +556,7 @@ def pick_packet(
     worker: str,
     kind: str,
     want_packet: Optional[str] = None,
+    method: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """挑一个包给这个 worker。
 
@@ -445,6 +564,7 @@ def pick_packet(
       - AI 不领已有 pending AI 提交的包（免得两个客户端各算一遍同一个包）
       - need_human 只发给 human / repair
       - 同一个包不重复发给同一个 worker
+      - 被重标过的包不发给同一种标注方法（`method`，见 `method_blocked`）；repair 不受限
 
     「不重复发给同一个 worker」按**有没有提交过**判，不按有没有领过判。领过就永久排除
     的话，一个 worker 每次 release（换包、客户端崩了重启）都会把那个包对自己拉黑；单
@@ -459,11 +579,15 @@ def pick_packet(
     else:
         want_states = ("available",)
 
+    check = None if kind == "repair" else method
+
     if want_packet:
         r = one(c, "SELECT * FROM packets WHERE packet_id=?", (want_packet,))
         if not r:
             return None
         if r["state"] not in want_states:
+            return None
+        if r["state"] == "available" and method_blocked(r, check):
             return None
         return r
 
@@ -489,33 +613,51 @@ def pick_packet(
     # AI 优先领人类预标过的包，好跳过冷启动
     order = (
         "ORDER BY (p.seed_json IS NOT NULL AND p.seed_json != '') DESC, "
-        "p.priority DESC, p.created_at ASC LIMIT 1"
+        "p.priority DESC, p.created_at ASC"
         if kind == "ai" else
-        "ORDER BY p.priority DESC, p.created_at ASC LIMIT 1"
+        "ORDER BY p.priority DESC, p.created_at ASC"
     )
+    # 先挑没被重标过的包（绝大多数），只有它们发完了才去被重标过的包里按方法筛
     for st in want_states:
         args = [st, kind]
         if kind != "repair":
             args += [worker, worker, now() - FAIL_COOLDOWN_SEC]
+        base = "SELECT * FROM packets p WHERE p.state=? " + no_pending_ai + not_mine + fail_cool
         r = one(
             c,
-            "SELECT * FROM packets p WHERE p.state=? " + no_pending_ai + not_mine
-            + fail_cool + order,
+            base + "AND (p.blocked_methods_json IS NULL OR p.blocked_methods_json IN ('', '[]')) "
+            + order + " LIMIT 1",
             args,
         )
         if r:
             return r
+        for r in rows(
+            c,
+            base + "AND p.blocked_methods_json IS NOT NULL AND p.blocked_methods_json NOT IN ('', '[]') "
+            + order + " LIMIT 500",
+            args,
+        ):
+            if st != "available" or not method_blocked(r, check):
+                return r
     return None
 
 
-def open_lease(c: sqlite3.Connection, packet: Dict[str, Any], worker: str, kind: str) -> Dict[str, Any]:
+def open_lease(
+    c: sqlite3.Connection,
+    packet: Dict[str, Any],
+    worker: str,
+    kind: str,
+    method: Optional[str] = None,
+    info: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     t = now()
     ttl = lease_ttl(kind)
     lid = new_lease_id()
     c.execute(
         "INSERT INTO leases(lease_id, packet_id, worker, kind, prev_state, created_at, "
-        "expires_at, last_heartbeat) VALUES(?,?,?,?,?,?,?,?)",
-        (lid, packet["packet_id"], worker, kind, packet["state"], t, t + ttl, t),
+        "expires_at, last_heartbeat, method, method_json) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (lid, packet["packet_id"], worker, kind, packet["state"], t, t + ttl, t,
+         method, jdump(info) if info else None),
     )
     c.execute("UPDATE packets SET state='leased', updated_at=? WHERE packet_id=?", (t, packet["packet_id"]))
     c.commit()
@@ -609,15 +751,39 @@ def archive_packets(
     return {"archived": archived, "skipped": skipped, "reason": reason}
 
 
+def ban_video(
+    c: sqlite3.Connection,
+    p: Dict[str, Any],
+    *,
+    reason: str,
+    worker: str,
+) -> Optional[str]:
+    """把这个包的源视频记进停用表。返回 video_key；包里没有 group/stem 时返回 None。"""
+    meta = jload(p.get("meta_json"), {}) or {}
+    group = p.get("group_name") or meta.get("group")
+    stem = p.get("stem") or meta.get("stem")
+    if not group or not stem:
+        return None
+    key = video_key(group, stem)
+    c.execute(
+        "INSERT INTO banned_videos(video_key, group_name, stem, packet_id, reason, banned_by, created_at) "
+        "VALUES(?,?,?,?,?,?,?) ON CONFLICT(video_key) DO NOTHING",
+        (key, group, stem, p["packet_id"], reason, worker, now()),
+    )
+    return key
+
+
 def abandon_packet(
     c: sqlite3.Connection,
     packet_id: str,
     *,
     reason: str = "bad_quality",
     worker: str = "",
+    ban_source_video: bool = False,
 ) -> Dict[str, Any]:
-    """质量不行：归档包、清 GT、待审提交打成 rejected，从审核/修复队列消失。
+    """移除：数据质量不行，归档包、清 GT、待审提交打成 rejected，从审核/修复队列消失。
 
+    `ban_source_video` 再把整路源视频停用，产包端不再从它切包。
     没有球不该走这里——人工把整段标不可见再提交即可。
     """
     pid = str(packet_id or "").strip()
@@ -625,7 +791,10 @@ def abandon_packet(
     if not p:
         return {"ok": False, "error": "不存在"}
     if p["state"] == "archived":
-        return {"ok": True, "packet_id": pid, "already": True, "reason": reason}
+        vkey = ban_video(c, p, reason=reason, worker=worker) if ban_source_video else None
+        c.commit()
+        return {"ok": True, "packet_id": pid, "already": True, "reason": reason,
+                "banned_video": vkey, "packet_state": "archived"}
 
     t = now()
     open_leases = rows(
@@ -650,13 +819,15 @@ def abandon_packet(
         c.execute(
             "INSERT INTO reviews(submission_id, reviewer, decision, notes, created_at) "
             "VALUES(?,?,?,?,?)",
-            (s["submission_id"], worker or "abandon", "reject",
-             f"抛弃本包：{reason}", t),
+            (s["submission_id"], worker or "abandon", "remove",
+             f"移除本包：{reason}", t),
         )
     c.execute(
-        "UPDATE packets SET state='archived', need_frames_json=NULL, updated_at=? WHERE packet_id=?",
-        (t, pid),
+        "UPDATE packets SET state='archived', need_frames_json=NULL, removed_at=?, removed_by=?, "
+        "removed_reason=?, updated_at=? WHERE packet_id=?",
+        (t, worker or None, reason, t, pid),
     )
+    vkey = ban_video(c, p, reason=reason, worker=worker) if ban_source_video else None
     c.commit()
     return {
         "ok": True,
@@ -666,7 +837,120 @@ def abandon_packet(
         "n_pending_rejected": len(pending),
         "n_leases_released": len(open_leases),
         "packet_state": "archived",
+        "banned_video": vkey,
     }
+
+
+def review_submission(
+    c: sqlite3.Connection,
+    submission_id: int,
+    decision: str,
+    *,
+    reviewer: str,
+    frames: Optional[Dict[str, Any]] = None,
+    notes: Optional[str] = None,
+    reason: str = "bad_quality",
+    ban_source_video: bool = False,
+) -> Dict[str, Any]:
+    """审核一次提交（待审 AI，或已入库的再审）。四种裁决见模块文档。
+
+    `frames`：`{"<frame_idx>": true|false}`，只在 repair 下生效，false 是错误帧，没提到的算对。
+    repair 一帧都没打回就按 accept 处理。
+    """
+    decision = DECISION_ALIASES.get(decision, decision)
+    if decision not in REVIEW_DECISIONS:
+        return {"ok": False, "error": f"decision 只能是 {' / '.join(REVIEW_DECISIONS)}", "code": 400}
+    s = one(c, "SELECT * FROM submissions WHERE submission_id=?", (submission_id,))
+    if not s:
+        return {"ok": False, "error": "没有这个 submission", "code": 404}
+    pid = s["packet_id"]
+    p = one(c, "SELECT * FROM packets WHERE packet_id=?", (pid,)) or {}
+    labels = jload(s["labels_json"], []) or []
+    per_frame = frames if isinstance(frames, dict) else {}
+    all_frames = [int(r["frame_idx"]) for r in labels if r.get("frame_idx") is not None]
+
+    if decision == "repair":
+        rejected = {int(k) for k, v in per_frame.items() if not v}
+        bad_frames = [f for f in all_frames if f in rejected]
+        if not bad_frames:
+            decision = "accept"
+    if decision == "accept":
+        ok_frames, bad_frames = all_frames, []
+    elif decision == "repair":
+        ok_frames = [f for f in all_frames if f not in set(bad_frames)]
+    else:
+        ok_frames, bad_frames = [], all_frames
+
+    t = now()
+    c.execute(
+        "INSERT INTO reviews(submission_id, reviewer, decision, per_frame_json, notes, created_at) "
+        "VALUES(?,?,?,?,?,?)",
+        (submission_id, reviewer, decision,
+         jdump(per_frame) if (per_frame and decision == "repair") else None, notes, t),
+    )
+    sub_state = {"accept": "accepted", "repair": "partial"}.get(decision, "rejected")
+    c.execute(
+        "UPDATE submissions SET state=?, reviewed_at=?, n_accepted=?, n_rejected=? WHERE submission_id=?",
+        (sub_state, t, len(ok_frames), len(bad_frames), submission_id),
+    )
+    out: Dict[str, Any] = {
+        "ok": True, "decision": decision, "packet_id": pid,
+        "n_accepted": len(ok_frames), "n_rejected": len(bad_frames),
+        "n_gt_written": 0, "n_gt_removed": 0,
+    }
+
+    if decision == "remove":
+        c.commit()
+        res = abandon_packet(c, pid, reason=reason, worker=reviewer, ban_source_video=ban_source_video)
+        out.update(
+            n_gt_removed=int(res.get("n_gt_removed") or 0),
+            banned_video=res.get("banned_video"),
+            packet_state="archived",
+        )
+        return out
+
+    if decision == "relabel":
+        out["n_gt_removed"] = int(c.execute("DELETE FROM gt WHERE packet_id=?", (pid,)).rowcount or 0)
+        method = submission_method(s)
+        blocked = blocked_methods(p)
+        if method not in blocked:
+            blocked.append(method)
+        c.execute(
+            "UPDATE packets SET state='available', need_frames_json=NULL, blocked_methods_json=?, "
+            "reviewed_at=?, updated_at=? WHERE packet_id=?",
+            (jdump(blocked), t, t, pid),
+        )
+        c.commit()
+        out.update(packet_state="available", blocked_method=method, blocked_methods=blocked)
+        return out
+
+    out["n_gt_removed"] = delete_gt_frames(c, pid, bad_frames)
+    c.commit()
+    if ok_frames:
+        out["n_gt_written"] = write_gt(
+            c, pid, labels, source=str(s["source"] or "ai"), worker=s["worker"],
+            submission_id=submission_id, only_frames=ok_frames,
+        )
+    state = "need_human" if bad_frames else "accepted"
+    c.execute(
+        "UPDATE packets SET state=?, need_frames_json=?, reviewed_at=?, updated_at=? WHERE packet_id=?",
+        (state, jdump(bad_frames) if bad_frames else None, t, t, pid),
+    )
+    c.commit()
+    out["packet_state"] = state
+    return out
+
+
+def blocklist(c: sqlite3.Connection) -> Dict[str, Any]:
+    """产包端的避让清单：停用的整路视频 + 已移除 / 归档的包（它们的时间窗不再切）。"""
+    videos = rows(
+        c, "SELECT video_key, group_name, stem, packet_id, reason, banned_by, created_at "
+           "FROM banned_videos ORDER BY created_at",
+    )
+    packets = [r["packet_id"] for r in rows(
+        c, "SELECT packet_id FROM packets WHERE state='archived' ORDER BY packet_id",
+    )]
+    return {"videos": videos, "video_keys": [v["video_key"] for v in videos], "packets": packets}
 
 
 def packet_status_text(row: Dict[str, Any]) -> str:
@@ -689,11 +973,15 @@ def packet_status_text(row: Dict[str, Any]) -> str:
     if state == "need_human":
         need = row.get("need_frames")
         n = len(need) if isinstance(need, list) else 0
-        tail = f"剩余 {n} 帧待重标" if n else "剩余部分待重标"
+        tail = f"{n} 帧待人工修复" if n else "部分帧待人工修复"
         return f"{reviewer} 部分通过，{tail}" if reviewer else f"部分通过，{tail}"
     if state == "available":
-        return "待领取"
+        n_block = len(row.get("blocked_methods") or [])
+        return f"待重标（已拒 {n_block} 种方法）" if n_block else "待领取"
     if state == "archived":
+        if row.get("removed_reason"):
+            who = str(row.get("removed_by") or "").strip()
+            return f"已移除（{who + '：' if who else ''}{row['removed_reason']}）"
         return "已归档"
     return state or "未知"
 
@@ -725,6 +1013,8 @@ def list_packets(
         "  p.produced_at, p.labeled_at, p.reviewed_at, p.thumb_ready, p.decim, p.clip_fps, "
         "  p.group_name, p.stem, p.tag, p.sampling, p.size_bytes, p.producer_job_id, "
         "  p.producer_node, p.need_frames_json, p.seed_json, p.seed_worker, p.seed_at, "
+        "  p.blocked_methods_json, p.removed_at, p.removed_by, p.removed_reason, "
+        "  s.harness, s.harness_version, s.model, s.model_version, s.label_date, s.method, s.method_tag, "
         "  (SELECT COUNT(*) FROM gt g WHERE g.packet_id=p.packet_id) n_gt, "
         "  (SELECT COUNT(*) FROM gt g WHERE g.packet_id=p.packet_id AND g.visible=1) n_gt_visible, "
         "  (SELECT COUNT(*) FROM submissions x WHERE x.packet_id=p.packet_id) n_submissions, "
@@ -753,6 +1043,7 @@ def list_packets(
         qc = jload(r.pop("qc_json"), {}) or {}
         r["qc_flags"] = qc.get("flags") or []
         r["need_frames"] = jload(r.pop("need_frames_json"), None)
+        r["blocked_methods"] = jload(r.pop("blocked_methods_json"), []) or []
         seed = jload(r.pop("seed_json"), None)
         r["has_seed"] = bool(seed)
         r["n_seed"] = len(seed) if isinstance(seed, (list, dict)) else 0

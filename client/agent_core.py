@@ -191,12 +191,15 @@ class AgentSession:
         fetch_fn: Optional[FetchFn] = None,
         store: Any = None,
         prepare_fn: Optional[PrepareFn] = None,
+        method: Optional[Dict[str, str]] = None,
     ) -> None:
         self.api = api
         self.work_root = Path(work_root)
         self.work_root.mkdir(parents=True, exist_ok=True)
         self.worker = worker or "agent"
         self.hb_interval = float(hb_interval)
+        # harness / harness_version / model / model_version，领包和提交都要带
+        self.method: Dict[str, str] = {k: str(v) for k, v in (method or {}).items() if v}
         self.fetch_fn = fetch_fn
         self.store = store
         self.prepare_fn = prepare_fn
@@ -416,12 +419,24 @@ class AgentSession:
 
     # ------------------------------------------------------------ 领包
 
-    def claim(self, worker: str = "", kind: str = "human") -> dict:
-        """领一个包（或接上自己没做完的那个）。后台起下载解码 + 心跳。"""
+    def claim(self, worker: str = "", kind: str = "human",
+              method: Optional[Dict[str, Any]] = None) -> dict:
+        """领一个包（或接上自己没做完的那个）。后台起下载解码 + 心跳。
+
+        `kind=human` 是「整包标注」的旧叫法；对服务端一律按 AI 领（`kind=ai`），
+        并带上 harness / 模型版本，被同一方法重标过的包不会发过来。
+        """
         who = worker or self.worker or "agent"
         kind = str(kind or "human")
         if kind not in ("human", "repair"):
             return {"error": "kind 只能是 human / repair"}
+        self.method.update({k: str(v) for k, v in (method or {}).items() if v})
+        if not (self.method.get("harness") and self.method.get("model")):
+            return {"error": (
+                "缺少标注方法：领包前要说明 harness 和 model（最好带版本）。"
+                "启动 MCP 时加 --harness/--harness-version/--model/--model-version，"
+                "或在 ball_lease 参数里传 harness、harness_version、model、model_version"
+            )}
 
         for sess_file in sorted(self.work_root.glob("*/session.json")):
             sess = self._read_json(sess_file)
@@ -439,14 +454,17 @@ class AgentSession:
             return self._claim_payload(pid, sess, resume=True)
 
         try:
-            lease = self.api.lease(who, kind)
+            lease = self.api.lease(who, "repair" if kind == "repair" else "ai", method=self.method)
         except Exception as e:  # noqa: BLE001
             return {"error": f"lease 失败: {type(e).__name__}: {e}"}
         if lease is None:
             return {
                 "packet_id": None,
                 "leased": False,
-                "message": "池子里暂时没有适合的包（repair 模式要有 need_human 的包）",
+                "message": (
+                    "池子里暂时没有适合的包（repair 模式要有 need_human 的包；"
+                    "被同一 harness+模型重标过的包不会再发给你）"
+                ),
             }
 
         pid = lease.packet_id
@@ -459,6 +477,7 @@ class AgentSession:
             "aoss_key": lease.aoss_key,
             "target_frames": lease.target_frames,
             "meta": lease.meta,
+            "method": dict(self.method),
             "started_at": time.time(),
             "done": False,
         }
@@ -1604,11 +1623,11 @@ class AgentSession:
 
     # ------------------------------------------------------------ 收口
 
-    def submit(self, packet_id: str, force: bool = False) -> dict:
+    def submit(self, packet_id: str, force: bool = False, visual_reviewed: bool = False) -> dict:
         """`build_result` + `submit(source="ai")` 进审核队列。
 
-        agent 通道不再免审入库。可见点还要过本地 verify 门（gate=0.6）；
-        过不了的帧默认拒绝整包，force=true 才放行。
+        agent 通道不再免审入库。默认保留 verify 门；完成标后视觉复核可用
+        visual_reviewed 跳过分数门，但仍要求目标帧齐全且至少一帧可见。
         """
         sess = self.load_session(packet_id)
         if not sess:
@@ -1642,8 +1661,8 @@ class AgentSession:
                 "n_visible": 0,
                 "n_labeled": len(labels),
             }
-        gated = self._gate_labels(prep, labels, meta)
-        if gated["n_fail"] and not force:
+        gated = self._gate_labels(prep, labels, meta) if not visual_reviewed else None
+        if gated and gated["n_fail"] and not force:
             return {
                 "error": f"{gated['n_fail']} 帧没过本地核验门，拒绝提交（force=true 才放行）",
                 "packet_id": packet_id,
@@ -1656,12 +1675,15 @@ class AgentSession:
         result = build_result(prep.meta, worker, labels, {"elapsed_sec": elapsed})
         result["source"] = "ai"
         result["workflow"] = "mcp-agent"
+        result["review_mode"] = "visual" if visual_reviewed else "verify"
+        method = {**(sess.get("method") or {}), **self.method}
         try:
             resp = self.api.submit(
                 result, None,
                 source="ai",
                 lease_id=sess.get("lease_id"),
                 worker=worker,
+                method=method,
             )
         except Exception as e:  # noqa: BLE001
             return {"error": f"提交失败: {type(e).__name__}: {e}"}
@@ -1678,8 +1700,10 @@ class AgentSession:
             "elapsed_sec": elapsed,
             "submission_id": (resp or {}).get("submission_id"),
             "has_bundle": False,
+            "method_tag": (resp or {}).get("method_tag"),
             "message": f"已提交（{len(labels)} 帧，source=ai 进审核，不再免审入库）",
             "source": "ai",
+            "review_mode": result["review_mode"],
         }
 
     def _gate_labels(self, prep, labels: Dict[str, dict], meta: dict) -> dict:

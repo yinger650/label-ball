@@ -1,0 +1,917 @@
+{
+  "packet_id": "260618__VID_20260618_203221_00_002__0708_0718",
+  "model": "gpt-6.1",
+  "model_version": "undisclosed",
+  "harness": "codex",
+  "harness_version": "0.163.0-alpha.10.2",
+  "skill_sha256": "0ed43d085d4aa745b55ed41fd10044b50557a975375d32879351b032c0423808",
+  "source": "ai",
+  "review_mode": "visual",
+  "reviewed_frames": 100,
+  "n_visible": 98,
+  "n_absent": 2,
+  "submitted": true,
+  "submission_id": 255,
+  "labels": [
+    {
+      "frame_idx": 21207,
+      "visible": true,
+      "pano_x": 5307.0,
+      "pano_y": 2351.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21210,
+      "visible": true,
+      "pano_x": 5318.0,
+      "pano_y": 2342.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21213,
+      "visible": true,
+      "pano_x": 5331.0,
+      "pano_y": 2334.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21216,
+      "visible": true,
+      "pano_x": 5344.0,
+      "pano_y": 2327.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21219,
+      "visible": true,
+      "pano_x": 5354.0,
+      "pano_y": 2317.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21222,
+      "visible": true,
+      "pano_x": 5227.0,
+      "pano_y": 2295.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21225,
+      "visible": true,
+      "pano_x": 5117.0,
+      "pano_y": 2279.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21228,
+      "visible": true,
+      "pano_x": 5022.0,
+      "pano_y": 2266.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21231,
+      "visible": true,
+      "pano_x": 4941.0,
+      "pano_y": 2248.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21234,
+      "visible": true,
+      "pano_x": 4867.0,
+      "pano_y": 2236.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21237,
+      "visible": true,
+      "pano_x": 4805.0,
+      "pano_y": 2220.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21240,
+      "visible": true,
+      "pano_x": 4752.0,
+      "pano_y": 2210.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21243,
+      "visible": true,
+      "pano_x": 4707.0,
+      "pano_y": 2199.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21246,
+      "visible": true,
+      "pano_x": 4687.0,
+      "pano_y": 2193.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21249,
+      "visible": true,
+      "pano_x": 4694.0,
+      "pano_y": 2192.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21252,
+      "visible": true,
+      "pano_x": 4697.0,
+      "pano_y": 2194.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21255,
+      "visible": true,
+      "pano_x": 4703.0,
+      "pano_y": 2200.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21258,
+      "visible": true,
+      "pano_x": 4708.0,
+      "pano_y": 2199.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21261,
+      "visible": true,
+      "pano_x": 4713.0,
+      "pano_y": 2203.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21264,
+      "visible": true,
+      "pano_x": 4719.0,
+      "pano_y": 2204.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21267,
+      "visible": true,
+      "pano_x": 4741.0,
+      "pano_y": 2208.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21270,
+      "visible": true,
+      "pano_x": 4760.0,
+      "pano_y": 2208.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21273,
+      "visible": true,
+      "pano_x": 4777.0,
+      "pano_y": 2210.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21276,
+      "visible": true,
+      "pano_x": 4792.0,
+      "pano_y": 2212.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21279,
+      "visible": true,
+      "pano_x": 4806.0,
+      "pano_y": 2213.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21282,
+      "visible": true,
+      "pano_x": 4821.0,
+      "pano_y": 2214.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21285,
+      "visible": true,
+      "pano_x": 4835.0,
+      "pano_y": 2216.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21288,
+      "visible": true,
+      "pano_x": 4849.0,
+      "pano_y": 2217.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21291,
+      "visible": true,
+      "pano_x": 4862.0,
+      "pano_y": 2218.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21294,
+      "visible": true,
+      "pano_x": 4876.0,
+      "pano_y": 2220.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21297,
+      "visible": true,
+      "pano_x": 4889.0,
+      "pano_y": 2220.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21300,
+      "visible": true,
+      "pano_x": 4925.0,
+      "pano_y": 2224.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21303,
+      "visible": true,
+      "pano_x": 5009.0,
+      "pano_y": 2226.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21306,
+      "visible": true,
+      "pano_x": 5082.0,
+      "pano_y": 2226.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21309,
+      "visible": true,
+      "pano_x": 5153.0,
+      "pano_y": 2224.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21312,
+      "visible": true,
+      "pano_x": 5216.0,
+      "pano_y": 2224.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21315,
+      "visible": true,
+      "pano_x": 5276.0,
+      "pano_y": 2223.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21318,
+      "visible": true,
+      "pano_x": 5332.0,
+      "pano_y": 2223.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21321,
+      "visible": true,
+      "pano_x": 5381.0,
+      "pano_y": 2221.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21324,
+      "visible": true,
+      "pano_x": 5428.0,
+      "pano_y": 2220.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21327,
+      "visible": true,
+      "pano_x": 5466.0,
+      "pano_y": 2217.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21330,
+      "visible": true,
+      "pano_x": 5504.0,
+      "pano_y": 2214.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21333,
+      "visible": true,
+      "pano_x": 5536.0,
+      "pano_y": 2213.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21336,
+      "visible": true,
+      "pano_x": 5566.0,
+      "pano_y": 2210.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21339,
+      "visible": true,
+      "pano_x": 5594.0,
+      "pano_y": 2208.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21342,
+      "visible": true,
+      "pano_x": 5622.0,
+      "pano_y": 2206.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21345,
+      "visible": true,
+      "pano_x": 5647.0,
+      "pano_y": 2203.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21348,
+      "visible": true,
+      "pano_x": 5672.0,
+      "pano_y": 2201.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21351,
+      "visible": true,
+      "pano_x": 5696.0,
+      "pano_y": 2200.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21354,
+      "visible": true,
+      "pano_x": 5636.0,
+      "pano_y": 2179.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21357,
+      "visible": true,
+      "pano_x": 5544.0,
+      "pano_y": 2164.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21360,
+      "visible": true,
+      "pano_x": 5444.0,
+      "pano_y": 2147.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21363,
+      "visible": true,
+      "pano_x": 5350.0,
+      "pano_y": 2134.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21366,
+      "visible": true,
+      "pano_x": 5272.0,
+      "pano_y": 2137.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21369,
+      "visible": true,
+      "pano_x": 5194.0,
+      "pano_y": 2140.0,
+      "occluded": true,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21372,
+      "visible": false,
+      "pano_x": null,
+      "pano_y": null,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21375,
+      "visible": true,
+      "pano_x": 5058.0,
+      "pano_y": 2149.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21378,
+      "visible": true,
+      "pano_x": 5004.0,
+      "pano_y": 2131.0,
+      "occluded": true,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21381,
+      "visible": true,
+      "pano_x": 4961.0,
+      "pano_y": 2121.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21384,
+      "visible": true,
+      "pano_x": 4912.0,
+      "pano_y": 2114.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21387,
+      "visible": true,
+      "pano_x": 4872.0,
+      "pano_y": 2112.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21390,
+      "visible": true,
+      "pano_x": 4832.0,
+      "pano_y": 2116.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21393,
+      "visible": true,
+      "pano_x": 4800.0,
+      "pano_y": 2118.0,
+      "occluded": true,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21396,
+      "visible": false,
+      "pano_x": null,
+      "pano_y": null,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21399,
+      "visible": true,
+      "pano_x": 4746.0,
+      "pano_y": 2098.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21402,
+      "visible": true,
+      "pano_x": 4721.0,
+      "pano_y": 2094.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21405,
+      "visible": true,
+      "pano_x": 4699.0,
+      "pano_y": 2096.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21408,
+      "visible": true,
+      "pano_x": 4676.0,
+      "pano_y": 2102.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21411,
+      "visible": true,
+      "pano_x": 4658.0,
+      "pano_y": 2098.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21414,
+      "visible": true,
+      "pano_x": 4637.0,
+      "pano_y": 2092.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21417,
+      "visible": true,
+      "pano_x": 4618.0,
+      "pano_y": 2086.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21420,
+      "visible": true,
+      "pano_x": 4601.0,
+      "pano_y": 2091.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21423,
+      "visible": true,
+      "pano_x": 4583.0,
+      "pano_y": 2089.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21426,
+      "visible": true,
+      "pano_x": 4567.0,
+      "pano_y": 2086.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21429,
+      "visible": true,
+      "pano_x": 4551.0,
+      "pano_y": 2085.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21432,
+      "visible": true,
+      "pano_x": 4536.0,
+      "pano_y": 2082.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21435,
+      "visible": true,
+      "pano_x": 4520.0,
+      "pano_y": 2079.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21438,
+      "visible": true,
+      "pano_x": 4507.0,
+      "pano_y": 2078.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21441,
+      "visible": true,
+      "pano_x": 4494.0,
+      "pano_y": 2075.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21444,
+      "visible": true,
+      "pano_x": 4481.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21447,
+      "visible": true,
+      "pano_x": 4473.0,
+      "pano_y": 2072.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21450,
+      "visible": true,
+      "pano_x": 4466.0,
+      "pano_y": 2074.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21453,
+      "visible": true,
+      "pano_x": 4468.0,
+      "pano_y": 2075.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21456,
+      "visible": true,
+      "pano_x": 4469.0,
+      "pano_y": 2076.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21459,
+      "visible": true,
+      "pano_x": 4464.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21462,
+      "visible": true,
+      "pano_x": 4463.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21465,
+      "visible": true,
+      "pano_x": 4462.0,
+      "pano_y": 2072.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21468,
+      "visible": true,
+      "pano_x": 4460.0,
+      "pano_y": 2072.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21471,
+      "visible": true,
+      "pano_x": 4459.0,
+      "pano_y": 2072.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21474,
+      "visible": true,
+      "pano_x": 4457.0,
+      "pano_y": 2072.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21477,
+      "visible": true,
+      "pano_x": 4457.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21480,
+      "visible": true,
+      "pano_x": 4457.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21483,
+      "visible": true,
+      "pano_x": 4457.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21486,
+      "visible": true,
+      "pano_x": 4459.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21489,
+      "visible": true,
+      "pano_x": 4459.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21492,
+      "visible": true,
+      "pano_x": 4485.0,
+      "pano_y": 2061.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21495,
+      "visible": true,
+      "pano_x": 4530.0,
+      "pano_y": 2042.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21498,
+      "visible": true,
+      "pano_x": 4577.0,
+      "pano_y": 2030.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21501,
+      "visible": true,
+      "pano_x": 4628.0,
+      "pano_y": 2017.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 21504,
+      "visible": true,
+      "pano_x": 4674.0,
+      "pano_y": 2009.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    }
+  ]
+}

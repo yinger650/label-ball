@@ -1,6 +1,6 @@
 # 安装到 Codex
 
-Codex **不靠 `skills/` 目录**。它的触发面是 `AGENTS.md`：项目根 `AGENTS.md`，或全局 `~/.codex/AGENTS.md`。把 skill 目录拷进仓库不会让 Codex 自己想起来用它。配置在 `~/.codex/config.toml`。
+项目内 skill 通过 `~/.codex/skills/ball-label` 链接安装，项目 `AGENTS.md` 提供标注触发规则。MCP 配置在 `~/.codex/config.toml`。
 
 ## 1. MCP server
 
@@ -28,23 +28,12 @@ BALL_AI_WORK = "/home/你/.cache/ball_ai/work"
 codex mcp list
 ```
 
-## 2. 触发片段（`AGENTS.md`）
+## 2. Skill 与项目规则
 
-项目根 `AGENTS.md` 已含「足球 GT 标注」段。最短可用片段：
-
-```markdown
-## 足球 GT 标注
-
-被要求标球时读 `skills/ball-label/SKILL.md`，按 ball_plan → overview/scan →
-strip+nominate → fit → commit → submit 走，不要自己发明 480→80→45 逐帧循环。
-
-- 只标比赛用球。球可以是静止的。
-- 主力窗 240–480 px（要看得见人）。只回答格子号。
-- ball_submit 走 source=ai 进审核，必须过本地闸门。不要当成人免审。
-- 看不见就 ball_absent。冷启动找不到就 ball_release。
-```
-
-全局生效就放 `~/.codex/AGENTS.md`。
+将本目录链接到 `~/.codex/skills/ball-label`。项目 `AGENTS.md` 应指向本 skill。
+默认用 `ball_label(roi_xy)` 直接标球心，再用 `scripts/coordinate_review.py`
+读取保存结果画逐帧叠加和轨迹连线。视觉复核后 `ball_submit(visual_reviewed=true)`
+进入 AI 审核；分数仅参考，缺帧仍拒绝。格子只辅助区域定位。
 
 ## 3. 环境（不要进 git）
 

@@ -69,6 +69,8 @@ class Lease:
     kind: str
     target_frames: List[int]
     prior_labels: List[dict] = field(default_factory=list)
+    # 修补租约：已入库的正确帧，只当插值参照，不随提交回传
+    context_labels: List[dict] = field(default_factory=list)
     expires_at: float = 0.0
     ttl_sec: float = 0.0
     raw: Dict[str, Any] = field(default_factory=dict)
@@ -93,6 +95,7 @@ class Lease:
             kind=str(blob.get("kind") or "ai"),
             target_frames=[int(x) for x in (blob.get("target_frames") or [])],
             prior_labels=[r for r in prior if isinstance(r, dict)],
+            context_labels=[r for r in (blob.get("context_labels") or []) if isinstance(r, dict)],
             expires_at=float(blob.get("expires_at") or 0.0),
             ttl_sec=float(blob.get("ttl_sec") or 0.0),
             raw=dict(blob),
@@ -223,11 +226,20 @@ class ServerClient:
 
     # ---------------------------------------------------------------- 业务
 
-    def lease(self, worker: str = "", kind: str = "ai", packet_id: str = "") -> Optional[Lease]:
+    def lease(
+        self,
+        worker: str = "",
+        kind: str = "ai",
+        packet_id: str = "",
+        method: Optional[Dict[str, str]] = None,
+    ) -> Optional[Lease]:
+        """`method`：harness / harness_version / model / model_version。AI 领包要带，
+        服务端据此不发被同一方法重标过的包。"""
         who = worker or self.worker
         body: Dict[str, Any] = {"worker": who, "kind": kind}
         if packet_id:
             body["packet_id"] = packet_id
+        body.update({k: v for k, v in (method or {}).items() if v})
         payload = self.post("/api/v2/lease", body)
         got = Lease.from_response(payload if isinstance(payload, dict) else {})
         if got is None:
@@ -238,11 +250,14 @@ class ServerClient:
     def heartbeat(self, lease_id: str, stage: Optional[str] = None) -> dict:
         return self.post(f"/api/v2/heartbeat/{lease_id}", {"stage": stage} if stage else {})
 
-    def abandon(self, packet_id: str, reason: str = "bad_quality", worker: str = "") -> dict:
+    def abandon(self, packet_id: str, reason: str = "bad_quality", worker: str = "",
+                ban_video: bool = False) -> dict:
         body: Dict[str, Any] = {"packet_id": packet_id, "reason": reason}
         who = worker or self.worker
         if who:
             body["worker"] = who
+        if ban_video:
+            body["ban_video"] = True
         return self.post("/api/v2/abandon", body)
 
     def release(self, lease_id: str, reason: str = "released") -> dict:
@@ -290,11 +305,13 @@ class ServerClient:
         worker: Optional[str] = None,
         workflow: Optional[str] = None,
         model_used: Optional[str] = None,
+        method: Optional[Dict[str, str]] = None,
     ) -> dict:
         fields = {
             "source": source,
             "packet_id": str(result.get("packet_id") or ""),
         }
+        fields.update({k: str(v) for k, v in (method or {}).items() if v})
         if lease_id:
             fields["lease_id"] = str(lease_id)
         who = worker or self.worker or result.get("annotator")

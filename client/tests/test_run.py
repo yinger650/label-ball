@@ -50,7 +50,8 @@ class FakeAPI(ServerClient):
         self.heartbeats: List[str] = []
         self.lease_calls = 0
 
-    def lease(self, worker: str = "", kind: str = "ai") -> Optional[Lease]:
+    def lease(self, worker: str = "", kind: str = "ai", packet_id: str = "",
+              method: Optional[dict] = None) -> Optional[Lease]:
         self.lease_calls += 1
         return self._lease
 

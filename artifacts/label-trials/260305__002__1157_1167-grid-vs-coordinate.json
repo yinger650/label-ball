@@ -1,0 +1,84 @@
+{
+  "packet_id": "260305__002__1157_1167",
+  "scope": "4-frame pilot, not full packet annotation",
+  "grid": {
+    "window_px": 240,
+    "cols": 6,
+    "rows": 6,
+    "cell_px": 40
+  },
+  "gate": 0.6,
+  "comparison": [
+    {
+      "frame_idx": 34691,
+      "cell": "C3",
+      "grid_roi_xy": [
+        1231.9,
+        750.37
+      ],
+      "grid_verify": 0.971,
+      "direct_roi_xy": [
+        1247,
+        764
+      ],
+      "direct_verify": 0.855
+    },
+    {
+      "frame_idx": 34694,
+      "cell": "D3",
+      "grid_roi_xy": [
+        1257.46,
+        739.55
+      ],
+      "grid_verify": 0.622,
+      "direct_roi_xy": [
+        1242,
+        759
+      ],
+      "direct_verify": 0.822
+    },
+    {
+      "frame_idx": 34697,
+      "cell": "D3",
+      "grid_roi_xy": [
+        1250.24,
+        734.13
+      ],
+      "grid_verify": 0.436,
+      "direct_roi_xy": [
+        1235,
+        753
+      ],
+      "direct_verify": 0.973
+    },
+    {
+      "frame_idx": 34700,
+      "cell": "D4",
+      "grid_roi_xy": [
+        1243.02,
+        768.72
+      ],
+      "grid_verify": 0.527,
+      "direct_roi_xy": [
+        1231,
+        751
+      ],
+      "direct_verify": 1.0
+    }
+  ],
+  "grid_passed": 2,
+  "direct_passed": 4,
+  "committed_frames": [
+    34691,
+    34694,
+    34697,
+    34700
+  ],
+  "submitted": false,
+  "limitations": [
+    "No independent human ground truth; verify scores are not accuracy",
+    "Four nearby frames from one dribble segment only",
+    "Direct coordinates read visually from RGB strips and retain local verification"
+  ],
+  "follow_image": "/Users/wangmin/.cache/ball_ai/work/260305__002__1157_1167/views/f0-8d568d04_0.png"
+}

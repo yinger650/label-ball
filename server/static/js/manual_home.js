@@ -125,20 +125,37 @@ async function claim(kind, mode, packetId) {
   setBusy(true, '准备超时', '准备超时，请刷新后重试', 'bad');
 }
 
+function fmtDay(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  const d = typeof v === 'number' ? new Date(v * 1000) : new Date(String(v));
+  if (Number.isNaN(d.getTime())) return String(v);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function methodText(r) {
+  return r.method_tag || [r.model_used, r.workflow].filter(Boolean).join(' · ') || r.worker || '—';
+}
+
 function renderLabel(rows) {
   if (!rows.length) {
     $('#tableWrap').innerHTML = '<div class="dim">没有可领的包</div>';
     return;
   }
   $('#tableWrap').innerHTML = `<table><thead><tr>
-    <th>packet</th><th>状态</th><th>预标</th><th>目标帧</th><th></th>
+    <th>packet</th><th>生产</th><th>状态</th><th>预标</th><th>目标帧</th><th></th>
   </tr></thead><tbody>${rows.map((p) => {
     const seed = p.has_seed
       ? `<span class="tag ok">已预标 ${p.n_seed || ''}</span>`
       : '<span class="dim">—</span>';
+    const relabel = (p.blocked_methods || []).length;
+    const st = relabel
+      ? `<span class="tag warn" title="${(p.blocked_methods || []).join('\n')}">待重标 · 已拒 ${relabel} 种方法</span>`
+      : `<span class="tag">${p.status_text || p.state}</span>`;
     return `<tr class="q" data-pid="${p.packet_id}">
       <td class="mono">${p.packet_id}<div class="dim">${p.sampling || ''} · ${p.stem || ''}</div></td>
-      <td><span class="tag">${p.state}</span></td>
+      <td class="dim">${fmtDay(p.produced_at)}</td>
+      <td>${st}</td>
       <td>${seed}${p.seed_worker ? `<div class="dim">${p.seed_worker}</div>` : ''}</td>
       <td>${p.n_targets || '—'}</td>
       <td style="text-align:right">
@@ -160,7 +177,7 @@ function renderReview(rows) {
     return;
   }
   $('#tableWrap').innerHTML = `<table><thead><tr>
-    <th>submission</th><th>packet</th><th>来源</th><th>覆盖</th><th>置信</th><th>QC</th><th></th>
+    <th>submission</th><th>packet</th><th>生产</th><th>来源</th><th>标注方法</th><th>覆盖</th><th>置信</th><th>QC</th><th></th>
   </tr></thead><tbody>${rows.map((r) => {
     const cov = r.coverage == null ? '—' : Math.round(r.coverage * 100) + '%';
     const tags = (r.qc_flags || []).map((f) => `<span class="tag warn">${f}</span>`).join('')
@@ -168,7 +185,9 @@ function renderReview(rows) {
     return `<tr class="q" data-id="${r.submission_id}">
       <td class="mono">#${r.submission_id}</td>
       <td class="mono">${r.packet_id}</td>
-      <td>${r.source === 'human' ? '人工' : (r.source || '—')}</td>
+      <td class="dim">${fmtDay(r.produced_at)}</td>
+      <td>${r.source === 'human' ? '人工' : (r.source === 'ai' ? 'AI' : (r.source || '—'))}</td>
+      <td>${methodText(r)}</td>
       <td>${r.n_labeled}/${r.n_targets}（${cov}）</td>
       <td>${r.mean_conf == null ? '—' : r.mean_conf.toFixed(2)}</td>
       <td>${tags || '—'}</td>
@@ -227,15 +246,16 @@ function renderRepair(rows) {
   [...S.selected].forEach((id) => { if (!keep.has(id)) S.selected.delete(id); });
   $('#tableWrap').innerHTML = `<table><thead><tr>
     <th class="chk"><input type="checkbox" id="chkAll" title="全选"></th>
-    <th>packet</th><th>待修帧</th><th>来源</th><th></th>
+    <th>packet</th><th>生产</th><th>待修帧</th><th>标注方法</th><th></th>
   </tr></thead><tbody>${rows.map((p) => {
     const n = Array.isArray(p.need_frames) ? p.need_frames.length : '—';
     const on = S.selected.has(p.packet_id);
     return `<tr class="q${on ? ' sel' : ''}" data-pid="${p.packet_id}">
       <td class="chk"><input type="checkbox"${on ? ' checked' : ''}></td>
       <td class="mono">${p.packet_id}</td>
+      <td class="dim">${fmtDay(p.produced_at)}</td>
       <td class="err">待修 ${n} 帧</td>
-      <td>${p.worker || p.model_used || '—'}</td>
+      <td>${methodText(p)}</td>
       <td style="text-align:right"><button class="sm primary" data-act="fix">修复</button></td></tr>`;
   }).join('')}</tbody></table>`;
   const wrap = $('#tableWrap');

@@ -333,16 +333,27 @@ def run(args) -> int:
 
         # ---- AI 提交
         print("\n[6/9] AI 提交（只传 labels）", flush=True)
-        st, sub = cli.post_multipart(
+        st, nometa = cli.post_multipart(
             "/api/v2/submit",
             {"lease_id": lease_a["lease_id"], "source": "ai", "packet_id": cur["packet_id"],
              "workflow": "erp_ball_v1", "model_used": "glm-4.6v-flash"},
             {"result": cur["out"] / "result.json"},
             worker="ai-1",
         )
+        ck(st == 400, "AI 提交不带 harness+模型被拒", f"HTTP {st}")
+        st, sub = cli.post_multipart(
+            "/api/v2/submit",
+            {"lease_id": lease_a["lease_id"], "source": "ai", "packet_id": cur["packet_id"],
+             "workflow": "erp_ball_v1", "harness": "smoke-harness", "harness_version": "1.0",
+             "model": "glm-4.6v-flash", "model_version": "2026-09", "label_date": "2026-10-20"},
+            {"result": cur["out"] / "result.json"},
+            worker="ai-1",
+        )
         sid = (sub or {}).get("submission_id")
         ck(st == 200 and sid and sub["state"] == "pending",
            "AI 提交进 submissions 等审核（不直接入库）", f"submission_id={sid}")
+        ck(sub.get("method_tag") == "smoke-harness 1.0 · glm-4.6v-flash 2026-09 · 2026-10-20",
+           "AI 标记带 harness 版本 + 模型版本 + 日期", str(sub.get("method_tag")))
         ck(sub.get("n_gt_written") == 0, "AI 提交没有写 gt（必须先过审核）")
         ck(isinstance(sub.get("qc"), dict) and "coverage" in sub["qc"],
            "submit 时算好 QC 存下来", f"flags={sub['qc'].get('flags')}")
@@ -370,13 +381,16 @@ def run(args) -> int:
 
         # ---- 审核：逐帧打回
         print("\n[7/9] 审核与打回", flush=True)
+        st, bad_dec = cli.post(f"/api/v2/review/{sid}", {"reviewer": "smoke-reviewer", "decision": "maybe"})
+        ck(st == 400, "未知裁决被拒", f"HTTP {st}")
         labels = det["submission"]["labels"]
         reject = [labels[3]["frame_idx"], labels[7]["frame_idx"]]
         st, rv = cli.post(f"/api/v2/review/{sid}", {
-            "reviewer": "smoke-reviewer", "decision": "partial",
-            "frames": {str(f): False for f in reject}, "notes": "冒烟：打回两帧"})
-        ck(st == 200 and rv["n_rejected"] == 2 and rv["packet_state"] == "need_human",
-           "逐帧打回 → 包转 need_human", json.dumps(rv, ensure_ascii=False))
+            "reviewer": "smoke-reviewer", "decision": "repair",
+            "frames": {str(f): False for f in reject}, "notes": "冒烟：两帧错误"})
+        ck(st == 200 and rv["decision"] == "repair" and rv["n_rejected"] == 2
+           and rv["packet_state"] == "need_human",
+           "部分人工修复 → 包转 need_human", json.dumps(rv, ensure_ascii=False))
         ck((det.get("frames") or [{}])[3].get("pano_x") is not None,
            "详情 frames 带 pano 坐标（canvas 叠加用）")
         ck(rv["n_gt_written"] == len(labels) - 2, "只有通过的帧入库")
@@ -389,8 +403,10 @@ def run(args) -> int:
         rep = (r or {}).get("lease") or {}
         ck(sorted(rep.get("target_frames") or []) == sorted(reject),
            "repair 租约只发被打回的帧", str(rep.get("target_frames")))
-        ck(len(rep.get("prior_labels") or []) == 2,
-           "repair 带上 AI 的答案作为初值（人工只修这几帧）")
+        ck(not rep.get("prior_labels"), "repair 不带错误帧的旧答案（人工从空白重标）")
+        ctx = rep.get("context_labels") or []
+        ck(len(ctx) == len(labels) - 2 and not any(r["frame_idx"] in reject for r in ctx),
+           "repair 带上已入库的正确帧当插值参照", f"{len(ctx)} 帧")
 
         fixed = {"packet_id": cur["packet_id"], "annotator": "human-1", "fps": 30.0,
                  "n_targets": len(labels),
@@ -431,8 +447,9 @@ def run(args) -> int:
         st, rv2 = cli.post(f"/api/v2/review/{sid_h}", {
             "reviewer": "qc-1", "decision": "partial",
             "frames": {str(reject_one): False}, "notes": "再审已入库人工包"})
-        ck(st == 200 and rv2.get("n_rejected") == 1 and rv2["packet_state"] == "need_human",
-           "已入库再审打回 → 包转 need_human", json.dumps(rv2, ensure_ascii=False))
+        ck(st == 200 and rv2.get("decision") == "repair" and rv2.get("n_rejected") == 1
+           and rv2["packet_state"] == "need_human",
+           "旧名 partial 仍按部分修复处理 → 包转 need_human", json.dumps(rv2, ensure_ascii=False))
         ck(int(rv2.get("n_gt_removed") or 0) == 1, "打回帧从 GT 删掉")
         st, gt = cli.get(f"/api/v2/gt/{other['packet_id']}")
         ck(all(g["frame_idx"] != reject_one for g in gt["gt"]), "打回帧已不在 gt")
@@ -448,8 +465,8 @@ def run(args) -> int:
         st, stats = cli.get("/api/v2/stats", hours=24, buckets=24)
         rr = stats.get("review_rate") or []
         ck(st == 200 and rr and rr[0]["frame_pass_rate"] is not None,
-           "stats 给出按模型/工作流的帧级通过率",
-           f"{rr[0]['model_used']} / {rr[0]['workflow']}: 帧级 {rr[0]['frame_pass_rate']}, "
+           "stats 给出按 harness/模型的帧级通过率",
+           f"{rr[0].get('method_label')}: 帧级 {rr[0]['frame_pass_rate']}, "
            f"包级 {rr[0]['packet_pass_rate']}")
         ck(stats["gt"]["n_ai"] > 0 and stats["gt"]["n_human"] > 0,
            "gt 里 AI 与人工帧都有", json.dumps(stats["gt"], ensure_ascii=False))
@@ -463,9 +480,11 @@ def run(args) -> int:
         # 脏提交放在最后：它会把 other 拨回 submitted，前面的状态断言必须已经跑完。
         # 「可见但没有坐标」必须在提交入口就降级——qc() 对这种行会 TypeError 让接口 500，
         # 万一漏进 gt，export_gt.py 之后会在同一处炸，那时已经查不出是哪个客户端塞的了
+        dirty_method = {"harness": "smoke-dirty", "harness_version": "0.1",
+                        "model": "dirty-test", "model_version": "v1"}
         st, dirty = cli.post("/api/v2/submit", {
             "packet_id": other["packet_id"], "source": "ai", "workflow": "erp_ball_v1",
-            "model_used": "dirty-test",
+            **dirty_method,
             "result": {"labels": [
                 {"frame_idx": 900, "visible": True, "pano_x": None, "pano_y": None},
                 {"frame_idx": 906, "visible": True, "pano_x": 1000.0, "pano_y": 500.0},
@@ -494,6 +513,50 @@ def run(args) -> int:
                 ck(n == stats["gt"]["n_frames"], "JSONL 摊平帧数与 gt 表一致", f"{n} 行")
         else:
             print("  · scripts/export_gt.py 还没写好，跳过导出检查", flush=True)
+
+        # ---- 重标 / 移除：会清 GT，所以放在导出之后
+        print("\n[10] 重标与移除", flush=True)
+        sid_d = dirty.get("submission_id")
+        st, rl = cli.post(f"/api/v2/review/{sid_d}", {"reviewer": "qc-1", "decision": "relabel"})
+        ck(st == 200 and rl.get("packet_state") == "available" and rl.get("blocked_method"),
+           "重标 → 包回待领取池并记下被拒方法", json.dumps(rl, ensure_ascii=False))
+        st, gt = cli.get(f"/api/v2/gt/{other['packet_id']}")
+        ck(not gt["gt"], "重标清空这个包的 GT")
+        st, r = cli.post("/api/v2/lease", {"worker": "ai-8", "kind": "ai", **dirty_method})
+        ck(st == 200 and (r or {}).get("lease") is None,
+           "同一 harness+模型换个 worker 也领不到重标包")
+        st, r = cli.post("/api/v2/lease", {"worker": "ai-8", "kind": "ai", "packet_id": other["packet_id"],
+                                           **dirty_method})
+        ck((r or {}).get("lease") is None, "点名领也领不到")
+        st, r = cli.post("/api/v2/lease", {"worker": "ai-9", "kind": "ai", **dirty_method,
+                                           "model_version": "v2"})
+        relab = (r or {}).get("lease") or {}
+        ck(relab.get("packet_id") == other["packet_id"]
+           and rl["blocked_method"] in (relab.get("blocked_methods") or []),
+           "换个模型版本就能领到，lease 带上被拒方法列表", str(relab.get("method")))
+        ck(relab.get("produced_at"), "lease 带生产时间")
+        cli.post(f"/api/v2/release/{relab['lease_id']}", {"reason": "smoke 复位"})
+        st, pk = cli.get("/api/v2/packets", state="available")
+        row = next((p for p in pk["packets"] if p["packet_id"] == other["packet_id"]), {})
+        ck("待重标" in (row.get("status_text") or ""), "列表状态写成待重标", row.get("status_text", ""))
+
+        st, rm = cli.post(f"/api/v2/review/{sid_h}", {
+            "reviewer": "qc-1", "decision": "remove", "reason": "画面花屏", "ban_video": True})
+        vkey = f"{other['meta']['group']}__{other['meta']['stem']}"
+        ck(st == 200 and rm.get("packet_state") == "archived" and rm.get("banned_video") == vkey,
+           "移除 → 包归档，顺带停用整路视频", json.dumps(rm, ensure_ascii=False))
+        st, r = cli.post("/api/v2/lease", {"worker": "ai-10", "kind": "ai", "harness": "x", "model": "y"})
+        ck((r or {}).get("lease") is None, "移除的包谁都领不到")
+        st, bl = cli.get("/api/v2/blocklist")
+        ck(st == 200 and vkey in bl.get("video_keys", []) and other["packet_id"] in bl.get("packets", []),
+           "blocklist 给产包端：停用视频 + 已移除包", json.dumps(bl.get("video_keys"), ensure_ascii=False))
+        st, pk = cli.get("/api/v2/packets", state="archived")
+        row = next((p for p in pk["packets"] if p["packet_id"] == other["packet_id"]), {})
+        ck("已移除" in (row.get("status_text") or "") and "画面花屏" in (row.get("status_text") or ""),
+           "列表状态写成已移除并带原因", row.get("status_text", ""))
+        st, page = cli.get(f"/review/{sid}")
+        ck(st == 200 and isinstance(page, bytes) and b"workbench.js" in page,
+           "/review/<sid> 出统一工作台")
 
         if args.keep_alive:
             print(f"\n[keep-alive] 服务端还在跑：http://127.0.0.1:{port}/"

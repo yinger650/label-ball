@@ -455,6 +455,31 @@ def load_used(store: Store, gt_dir: Path) -> Dict[str, List[Tuple[float, float]]
     return used
 
 
+def apply_blocklist(
+    videos: List[dict],
+    used: Dict[str, List[Tuple[float, float]]],
+    bl: Optional[dict],
+) -> None:
+    """按服务端避让清单原地剔除停用视频，并把已移除包的时间窗记成已用。
+
+    移除的包通常还留在对象存储上、`load_used` 已经避开了它的窗口；这里再按服务端补一遍，
+    对象被清掉之后也不会被重新切出来。服务端不可达（bl=None）就只靠 `load_used`。
+    """
+    if not bl:
+        return
+    banned = set(bl.get("video_keys") or [])
+    if banned:
+        before = len(videos)
+        videos[:] = [v for v in videos if f"{v['group']}__{v['stem']}" not in banned]
+        print(f"[blocklist] 停用视频 {len(banned)} 路，本机剔除 {before - len(videos)} 路", flush=True)
+    for pid in bl.get("packets") or []:
+        try:
+            group, stem, a, b = parse_packet_id(pid)
+        except ValueError:
+            continue
+        used.setdefault(f"{group}__{stem}", []).append((a, b))
+
+
 def run(args) -> None:
     cred = load_credentials(args.credentials)
     store = Store(cred)
@@ -508,6 +533,10 @@ def produce(args, store: Store, n_want: int, reporter: Optional[Reporter] = None
 
     used = load_used(store, Path(args.gt_dir))
     print(f"[pool] 已产出/已标注窗口涉及 {len(used)} 路视频", flush=True)
+    apply_blocklist(videos, used, reporter.api.blocklist() if reporter else None)
+    if not videos:
+        print("[stop] 可用视频都被停用了", flush=True)
+        return 0
     args = argparse.Namespace(**{**vars(args), "n_packets": n_want})
 
     # 优先抽窗口最少的视频，让覆盖面铺开而不是在同一路上反复取样

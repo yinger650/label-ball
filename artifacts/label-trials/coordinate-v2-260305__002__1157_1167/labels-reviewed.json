@@ -1,0 +1,192 @@
+{
+  "packet_id": "260305__002__1157_1167",
+  "frames_reviewed": 20,
+  "new_frames_this_trial": 15,
+  "n_visible": 18,
+  "n_absent": 2,
+  "total_targets": 100,
+  "submitted": false,
+  "review_mode": "visual",
+  "confidence_used": false,
+  "labels": [
+    {
+      "blurred": false,
+      "frame_idx": 34688,
+      "occluded": false,
+      "pano_x": 6701.899509803921,
+      "pano_y": 2236.373894694534,
+      "visible": true
+    },
+    {
+      "frame_idx": 34691,
+      "visible": true,
+      "pano_x": 6697.0,
+      "pano_y": 2230.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34694,
+      "visible": true,
+      "pano_x": 6692.0,
+      "pano_y": 2225.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34697,
+      "visible": true,
+      "pano_x": 6685.0,
+      "pano_y": 2219.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34700,
+      "visible": true,
+      "pano_x": 6681.0,
+      "pano_y": 2217.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34703,
+      "visible": true,
+      "pano_x": 6670.0,
+      "pano_y": 2208.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34706,
+      "visible": true,
+      "pano_x": 6595.0,
+      "pano_y": 2180.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34709,
+      "visible": true,
+      "pano_x": 6514.0,
+      "pano_y": 2160.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34712,
+      "visible": true,
+      "pano_x": 6447.0,
+      "pano_y": 2143.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34715,
+      "visible": true,
+      "pano_x": 6394.0,
+      "pano_y": 2129.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34718,
+      "visible": true,
+      "pano_x": 6348.0,
+      "pano_y": 2117.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34721,
+      "visible": false,
+      "pano_x": null,
+      "pano_y": null,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34724,
+      "visible": true,
+      "pano_x": 6270.0,
+      "pano_y": 2095.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34727,
+      "visible": true,
+      "pano_x": 6238.0,
+      "pano_y": 2085.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34730,
+      "visible": true,
+      "pano_x": 6210.0,
+      "pano_y": 2081.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34733,
+      "visible": true,
+      "pano_x": 6185.0,
+      "pano_y": 2073.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34736,
+      "visible": false,
+      "pano_x": null,
+      "pano_y": null,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34739,
+      "visible": true,
+      "pano_x": 6144.0,
+      "pano_y": 2066.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34742,
+      "visible": true,
+      "pano_x": 6126.0,
+      "pano_y": 2062.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    },
+    {
+      "frame_idx": 34745,
+      "visible": true,
+      "pano_x": 6108.0,
+      "pano_y": 2058.0,
+      "occluded": false,
+      "blurred": true,
+      "source": "agent"
+    }
+  ]
+}

@@ -41,7 +41,8 @@ from client.run import DEFAULT_WORK  # noqa: E402
 log = logging.getLogger("client.mcp_server")
 
 SERVER_NAME = "ball-gt"
-SERVER_VERSION = "1.1.0"
+SERVER_VERSION = "1.2.0"
+METHOD_KEYS = ("harness", "harness_version", "model", "model_version")
 # 客户端报的版本在这个集合里就照它回，否则回我们开发时对的那一版
 KNOWN_PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
 DEFAULT_PROTOCOL = "2025-06-18"
@@ -63,6 +64,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         return sess_get().claim(
             worker=str(args.get("worker") or ""),
             kind=str(args.get("kind") or "human"),
+            method={k: args.get(k) for k in METHOD_KEYS},
         )
 
     def t_status(args: dict) -> dict:
@@ -172,7 +174,10 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         )
 
     def t_submit(args: dict) -> dict:
-        return sess_get().submit(str(args.get("packet_id") or ""), bool(args.get("force")))
+        return sess_get().submit(
+            str(args.get("packet_id") or ""), bool(args.get("force")),
+            visual_reviewed=bool(args.get("visual_reviewed")),
+        )
 
     def t_release(args: dict) -> dict:
         return sess_get().release(
@@ -194,6 +199,8 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
                 "领一个待标注的足球 GT 包（或接上自己没做完的那个），并在后台开始"
                 "下载解码 + 租约心跳。返回 packet_id、目标帧数、ROI。"
                 "下载解码约 1–3 分钟，之后用 ball_status 轮询到 ready。"
+                "必须说明标注方法（harness + 模型，带版本）：启动参数没配时在这里传。"
+                "被同一方法重标过的包不会再发给你。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -205,6 +212,10 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
                         "default": "human",
                         "description": "human=整包标注；repair=只标被打回的那几帧",
                     },
+                    "harness": {"type": "string", "description": "驱动你的 harness，如 codex / cursor / dsh"},
+                    "harness_version": {"type": "string", "description": "harness 版本号"},
+                    "model": {"type": "string", "description": "你自己的模型名，如 gpt-6-astra"},
+                    "model_version": {"type": "string", "description": "模型版本 / 快照日期"},
                 },
             },
             "handler": t_lease,
@@ -505,13 +516,16 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             "name": "ball_submit",
             "description": (
                 "整包提交，source=ai 进审核队列（不再免审入库）。可见点必须过本地 "
-                "verify 门；没过的帧默认拒绝整包。目标帧没标满也拒绝。force=true 才放行。"
+                "verify 门；visual_reviewed=true 表示已看标注叠加图和轨迹连线，跳过分数门。"
+                "visual_reviewed 不豁免缺帧或全不可见检查。"
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "packet_id": {"type": "string"},
                     "force": {"type": "boolean", "default": False, "description": "缺帧也提交"},
+                    "visual_reviewed": {"type": "boolean", "default": False,
+                                        "description": "已逐帧视觉复核并检查轨迹；不按 verify 分数拦截，仍要求标满并进 AI 审核"},
                 },
                 "required": ["packet_id"],
             },
@@ -596,8 +610,8 @@ class McpServer:
             "instructions": (
                 "足球 GT 标注：ball_lease → ball_status 等 ready → ball_plan。"
                 "冷启动 ball_overview 看人 + ball_scan 读轨迹；之后对 query_frames "
-                "ball_strip(240–480) + ball_nominate → ball_fit → ball_follow → "
-                "ball_commit（过门才写）→ ball_submit（source=ai 进审核）。"
+                "ball_strip(240–480) 看上下文，ball_label(roi_xy) 直接标球心；"
+                "读取 labels 画叠加与连线复核 → ball_submit(visual_reviewed=true)，source=ai 进审核。"
                 "视频路线通了用 ball_video。只标比赛用球；球可以是静止的；看不见就 absent。"
             ),
         }
@@ -691,6 +705,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--work", type=Path, default=DEFAULT_WORK, help="本机工作区")
     p.add_argument("--token", default="", help="写鉴权 token，默认读 BALL_GT_API_TOKEN / .env")
     p.add_argument("--hb-interval", type=float, default=120.0, help="租约心跳间隔秒")
+    p.add_argument("--harness", default=os.environ.get("BALL_GT_HARNESS") or "",
+                   help="驱动 agent 的 harness（codex / cursor / dsh …），记进 AI 标记")
+    p.add_argument("--harness-version", default=os.environ.get("BALL_GT_HARNESS_VERSION") or "")
+    p.add_argument("--model", default=os.environ.get("BALL_GT_MODEL") or "",
+                   help="agent 用的模型名，记进 AI 标记")
+    p.add_argument("--model-version", default=os.environ.get("BALL_GT_MODEL_VERSION") or "")
     return p.parse_args(argv)
 
 
@@ -707,11 +727,16 @@ def main(argv=None) -> int:
     except Exception:  # noqa: BLE001
         pass
 
+    method = {"harness": a.harness, "harness_version": a.harness_version,
+              "model": a.model, "model_version": a.model_version}
+
     def factory() -> AgentSession:
         api = ServerClient(a.server, token=a.token, worker=a.worker)
-        return AgentSession(api, work_root=a.work, worker=a.worker, hb_interval=a.hb_interval)
+        return AgentSession(api, work_root=a.work, worker=a.worker, hb_interval=a.hb_interval,
+                            method=method)
 
-    log.info("MCP stdio 就绪 server=%s worker=%s work=%s", a.server, a.worker, a.work)
+    log.info("MCP stdio 就绪 server=%s worker=%s work=%s method=%s",
+             a.server, a.worker, a.work, {k: v for k, v in method.items() if v} or "未配置")
     return serve(McpServer(factory))
 
 

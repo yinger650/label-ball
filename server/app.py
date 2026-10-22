@@ -133,7 +133,8 @@ def page_review_queue():
 
 @app.get("/review/<int:submission_id>")
 def page_review(submission_id: int):
-    return send_from_directory(app.template_folder, "review.html")
+    """审核和标注、修复同一个工作台，按 URL 进审核模式。"""
+    return send_from_directory(app.template_folder, "workbench.html")
 
 
 @app.get("/healthz")
@@ -367,19 +368,33 @@ def api_archive():
     return jsonify(out)
 
 
+def _truthy(v: Any) -> bool:
+    return str(v).strip().lower() in ("1", "true", "yes", "on") if v is not None else False
+
+
 @app.post("/api/v2/abandon")
 def api_abandon():
-    """数据质量不行：归档并移出审核 / 修复队列。没有球请标不可见，不要走这里。"""
+    """移除：数据质量不行，归档并移出审核 / 修复队列。没有球请标不可见，不要走这里。
+
+    `ban_video=true` 顺带停用整路源视频，产包端不再从它切包。
+    """
     d = body()
     packet_id = str(d.get("packet_id") or "")
     if not packet_id or not SAFE_ID.match(packet_id):
         return bad("缺少 packet_id")
     reason = str(d.get("reason") or "bad_quality")
-    worker = worker_of(d)
-    out = db.abandon_packet(conn(), packet_id, reason=reason, worker=worker)
+    worker = str(d.get("reviewer") or worker_of(d))
+    out = db.abandon_packet(conn(), packet_id, reason=reason, worker=worker,
+                            ban_source_video=_truthy(d.get("ban_video")))
     if not out.get("ok"):
-        return bad(out.get("error") or "抛弃失败", 404)
+        return bad(out.get("error") or "移除失败", 404)
     return jsonify(out)
+
+
+@app.get("/api/v2/blocklist")
+def api_blocklist():
+    """产包端避让清单：停用视频 + 已移除 / 归档包。"""
+    return jsonify(db.blocklist(conn()))
 
 
 @app.post("/api/v2/recall")
@@ -424,6 +439,9 @@ def api_lease():
 
     `kind=repair` 时只返回被打回的帧号，并把 AI 的答案作为初值一起给出去——
     人工只修那几帧，这是整套系统的价值所在。
+
+    `kind=ai` 要带 harness / harness_version / model / model_version：被重标过的包
+    不会再发给同一种方法，提交时也按租约上记的方法打标记。
     """
     d = body()
     kind = str(d.get("kind") or "ai")
@@ -431,18 +449,21 @@ def api_lease():
         return bad(f"kind 只能是 {'/'.join(db.LEASE_KINDS)}")
     worker = worker_of(d)
     want = str(d.get("packet_id") or "").strip() or None
+    info = db.method_info(d)
+    method = None if kind == "repair" else db.method_key("ai" if kind == "ai" else "human", worker, info)
     c = conn()
     db.expire_leases(c)
 
-    p = db.pick_packet(c, worker, kind, want_packet=want)
+    p = db.pick_packet(c, worker, kind, want_packet=want, method=method)
     if not p:
         cnt = db.pool_counts(c)
         return jsonify({
             "lease": None,
             "reason": (
-                f"指定的包 {want} 现在不能领（不存在或状态不对）"
+                f"指定的包 {want} 现在不能领（不存在、状态不对，或被重标过且方法相同）"
                 if want else "池子里暂时没有适合该 worker 的包"
             ),
+            "method": method,
             "n_available": cnt["available"],
             "n_need_human": cnt["need_human"],
         })
@@ -450,41 +471,48 @@ def api_lease():
     meta = db.jload(p["meta_json"], {}) or {}
     targets = [int(x) for x in (meta.get("targets") or [])]
     prior: List[dict] = []
+    context: List[dict] = []
     if kind == "repair":
+        # 错误帧不带旧答案，人工从空白重标；已入库的正确帧只当插值参照
         need = db.jload(p["need_frames_json"], []) or []
         targets = [int(x) for x in need] or targets
-        last = db.one(
-            c,
-            "SELECT submission_id, labels_json FROM submissions WHERE packet_id=? "
-            "ORDER BY created_at DESC LIMIT 1",
-            (p["packet_id"],),
-        )
-        if last:
-            keep = set(targets)
-            prior = [r for r in (db.jload(last["labels_json"], []) or [])
-                     if int(r.get("frame_idx", -1)) in keep]
-    seed = db.jload(p.get("seed_json"), []) or []
-    if isinstance(seed, dict):
-        seed = list(seed.values())
-    have = {int(r.get("frame_idx", -1)) for r in prior}
-    for r in seed:
-        if not isinstance(r, dict) or r.get("frame_idx") is None:
-            continue
-        fi = int(r["frame_idx"])
-        if fi not in have:
-            prior.append(r)
-            have.add(fi)
+        bad = set(targets)
+        for g in db.rows(c, "SELECT frame_idx, pano_x, pano_y, visible, occluded, blurred, interp "
+                            "FROM gt WHERE packet_id=? ORDER BY frame_idx", (p["packet_id"],)):
+            if int(g["frame_idx"]) in bad:
+                continue
+            context.append({
+                "frame_idx": int(g["frame_idx"]), "pano_x": g["pano_x"], "pano_y": g["pano_y"],
+                "visible": bool(g["visible"]), "occluded": bool(g["occluded"]),
+                "blurred": bool(g["blurred"]), "interp": bool(g["interp"]),
+            })
+    else:
+        seed = db.jload(p.get("seed_json"), []) or []
+        if isinstance(seed, dict):
+            seed = list(seed.values())
+        have = set()
+        for r in seed:
+            if not isinstance(r, dict) or r.get("frame_idx") is None:
+                continue
+            fi = int(r["frame_idx"])
+            if fi not in have:
+                prior.append(r)
+                have.add(fi)
 
-    lease = db.open_lease(c, p, worker, kind)
+    lease = db.open_lease(c, p, worker, kind, method=method, info=info or None)
     return jsonify({"lease": {
         **lease,
         "packet_id": p["packet_id"],
         "aoss_key": p["aoss_key"],
         "kind": kind,
         "meta": meta,
+        "produced_at": p.get("produced_at"),
+        "method": method,
+        "blocked_methods": db.blocked_methods(p),
         "target_frames": targets,
         "n_targets": len(targets),
         "prior_labels": prior,
+        "context_labels": context,
     }})
 
 
@@ -593,6 +621,17 @@ def api_submit():
     if not labels:
         return bad("result 里没有任何 labels")
 
+    # 方法标记：请求字段 > result.json > 领包时记在租约上的
+    info = {**db.method_info(db.jload(lease.get("method_json"), {}) if lease else {}),
+            **db.method_info(result), **db.method_info(d)}
+    if source == "ai" and not (info.get("harness") and info.get("model")):
+        return bad("AI 提交必须带 harness 和 model（最好再带 harness_version / model_version）")
+    label_date = str(d.get("label_date") or result.get("label_date") or db.today_str())
+    method = db.method_key(source, worker, info)
+    tag = db.method_tag(source, worker, info, label_date)
+    model_used = d.get("model_used") or result.get("model_used") or (
+        " ".join(x for x in (info.get("model"), info.get("model_version")) if x) or None)
+
     meta = db.jload(p["meta_json"], {}) or {}
     n_targets = int(p["n_targets"] or len(meta.get("targets") or []) or len(labels))
     vis = [r for r in labels if r.get("visible")]
@@ -606,18 +645,21 @@ def api_submit():
     cur = c.execute(
         "INSERT INTO submissions(packet_id, lease_id, worker, source, workflow, model_used, "
         "labels_json, n_targets, n_labeled, n_visible, n_interp, mean_conf, qc_json, state, "
-        "elapsed_sec, n_vlm_calls, created_at, reviewed_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "elapsed_sec, n_vlm_calls, created_at, reviewed_at, "
+        "harness, harness_version, model, model_version, label_date, method, method_tag) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             packet_id, lease_id, worker, source,
             d.get("workflow") or result.get("workflow"),
-            d.get("model_used") or result.get("model_used"),
+            model_used,
             db.jdump(labels), n_targets, len(labels), len(vis),
             sum(1 for r in labels if r.get("interp")),
             round(sum(confs) / len(confs), 4) if confs else None,
             db.jdump(report), state,
             result.get("elapsed_sec"), result.get("n_vlm_calls"),
             t, t if source == "human" else None,
+            info.get("harness"), info.get("harness_version"), info.get("model"),
+            info.get("model_version"), label_date, method, tag,
         ),
     )
     sid = int(cur.lastrowid)
@@ -652,6 +694,8 @@ def api_submit():
         "n_labeled": len(labels),
         "n_degraded": n_degraded,
         "n_gt_written": n_gt,
+        "method": method,
+        "method_tag": tag,
         "qc": report,
         "thumb": {"base": f"/thumb/{packet_id}", "ready": bool(p.get("thumb_ready"))},
     })
@@ -693,75 +737,27 @@ def _set_packet_state(c, packet_id: str, state: str, need_frames: Optional[List[
 
 @app.post("/api/v2/review/<int:submission_id>")
 def api_review(submission_id: int):
-    """审核一次提交（AI 待审，或已入库的人工 / agent / 已通过 AI）。
+    """审核一次提交（AI 待审，或已入库的人工 / 已通过 AI 再审）。
 
-    `decision`：`accept` 整包通过 / `reject` 整包打回 / `partial` 逐帧。
-    `frames`：`{"<frame_idx>": true|false}`，只在 partial 下生效，没提到的帧算通过。
-
-    通过的帧写进 `gt`（这就是入库），打回的帧从 `gt` 删掉，并写进
-    `packets.need_frames_json`，包置为 `need_human`，人工用 `kind=repair` 领回去只修这几帧。
-    已入库再审打回时，原先免审写进去的行也会被删——否则「再审」只是记一条 reviews，GT 不动。
+    `decision`（旧名 reject=relabel、partial=repair 仍收）：
+      - `accept`  通过，整包入库
+      - `repair`  部分人工修复：`frames` 里 false 的是错误帧，其余入库，包转待修复
+      - `relabel` 重标：清 GT、回待领取池，这次提交的方法以后领不到这个包
+      - `remove`  移除：归档、清 GT；`ban_video=true` 再停用整路源视频
     """
     d = body()
-    decision = str(d.get("decision") or "")
-    if decision not in ("accept", "reject", "partial"):
-        return bad("decision 只能是 accept / reject / partial")
     reviewer = str(d.get("reviewer") or worker_of(d))
-
-    c = conn()
-    s = db.one(c, "SELECT * FROM submissions WHERE submission_id=?", (submission_id,))
-    if not s:
-        return bad("没有这个 submission", 404)
-
-    labels = db.jload(s["labels_json"], []) or []
-    per_frame: Dict[str, Any] = d.get("frames") if isinstance(d.get("frames"), dict) else {}
-    all_frames = [int(r["frame_idx"]) for r in labels if r.get("frame_idx") is not None]
-
-    if decision == "accept":
-        ok_frames, bad_frames = all_frames, []
-    elif decision == "reject":
-        ok_frames, bad_frames = [], all_frames
-    else:
-        rejected = {int(k) for k, v in per_frame.items() if not v}
-        ok_frames = [f for f in all_frames if f not in rejected]
-        bad_frames = [f for f in all_frames if f in rejected]
-        if not bad_frames:
-            decision = "accept"
-
-    t = db.now()
-    c.execute(
-        "INSERT INTO reviews(submission_id, reviewer, decision, per_frame_json, notes, created_at) "
-        "VALUES(?,?,?,?,?,?)",
-        (submission_id, reviewer, decision, db.jdump(per_frame) if per_frame else None,
-         d.get("notes"), t),
+    out = db.review_submission(
+        conn(), submission_id, str(d.get("decision") or ""),
+        reviewer=reviewer,
+        frames=d.get("frames") if isinstance(d.get("frames"), dict) else None,
+        notes=d.get("notes"),
+        reason=str(d.get("reason") or "bad_quality"),
+        ban_source_video=_truthy(d.get("ban_video")),
     )
-    n_removed = db.delete_gt_frames(c, s["packet_id"], bad_frames)
-    src = str(s["source"] or "ai")
-    n_gt = db.write_gt(
-        c, s["packet_id"], labels, source=src, worker=s["worker"],
-        submission_id=submission_id, only_frames=ok_frames,
-    ) if ok_frames else 0
-    sub_state = {"accept": "accepted", "reject": "rejected", "partial": "partial"}[decision]
-    c.execute(
-        "UPDATE submissions SET state=?, reviewed_at=?, n_accepted=?, n_rejected=? "
-        "WHERE submission_id=?",
-        (sub_state, t, len(ok_frames), len(bad_frames), submission_id),
-    )
-    c.commit()
-    _set_packet_state(
-        c, s["packet_id"],
-        "need_human" if bad_frames else "accepted",
-        bad_frames or None,
-    )
-    return jsonify({
-        "ok": True,
-        "decision": decision,
-        "n_accepted": len(ok_frames),
-        "n_rejected": len(bad_frames),
-        "n_gt_written": n_gt,
-        "n_gt_removed": n_removed,
-        "packet_state": "need_human" if bad_frames else "accepted",
-    })
+    if not out.get("ok"):
+        return bad(out.get("error") or "审核失败", int(out.get("code") or 400))
+    return jsonify(out)
 
 
 # ---------------------------------------------------------------- 查询
@@ -819,7 +815,7 @@ def api_submissions():
         args.append(request.args["packet_id"])
     rs = db.rows(
         conn(),
-        "SELECT s.*, p.state packet_state, p.thumb_ready FROM submissions s "
+        "SELECT s.*, p.state packet_state, p.thumb_ready, p.produced_at FROM submissions s "
         "JOIN packets p ON p.packet_id=s.packet_id "
         + ("WHERE " + " AND ".join(where) + " " if where else "")
         + "ORDER BY s.created_at ASC LIMIT ?",
@@ -839,6 +835,8 @@ def api_submissions():
             "has_bundle": bool(r.get("thumb_ready") or r["bundle_path"]),
             "has_thumb": bool(r.get("thumb_ready")),
             "created_at": r["created_at"],
+            "produced_at": r.get("produced_at"),
+            **{k: r.get(k) for k in db.METHOD_FIELDS + ("label_date", "method", "method_tag")},
         })
     # 有 QC 标记的排前面，其次低置信、插值多的
     out.sort(key=lambda x: (
@@ -913,6 +911,8 @@ def api_submission(submission_id: int):
             "labeled_at": p.get("labeled_at"),
             "reviewed_at": p.get("reviewed_at"),
             "thumb_ready": int(p.get("thumb_ready") or 0),
+            "blocked_methods": db.blocked_methods(p) if p else [],
+            "removed_reason": p.get("removed_reason"),
             "meta": packet_meta,
         },
         "thumb": {"base": f"/thumb/{pid}", "files": files, "ready": thumb_ready},
@@ -1035,18 +1035,28 @@ def api_stats():
     for r in db.rows(
         c,
         "SELECT COALESCE(model_used,'(未标注模型)') model_used, COALESCE(workflow,'(未标注工作流)') workflow, "
+        "  harness, harness_version, model, model_version, "
         "  COUNT(*) n_sub, "
         "  SUM(state='accepted') n_pkt_accepted, SUM(state='partial') n_pkt_partial, "
         "  SUM(state='rejected') n_pkt_rejected, SUM(state='pending') n_pending, "
         "  SUM(n_accepted) f_ok, SUM(n_rejected) f_bad, AVG(mean_conf) conf, "
         "  AVG(CAST(n_interp AS REAL)/NULLIF(n_labeled,0)) interp_ratio "
-        "FROM submissions WHERE source='ai' GROUP BY model_used, workflow ORDER BY n_sub DESC",
+        "FROM submissions WHERE source='ai' "
+        "GROUP BY harness, harness_version, model, model_version, model_used, workflow "
+        "ORDER BY n_sub DESC",
     ):
         judged = (r["n_pkt_accepted"] or 0) + (r["n_pkt_partial"] or 0) + (r["n_pkt_rejected"] or 0)
         frames = (r["f_ok"] or 0) + (r["f_bad"] or 0)
         r["n_judged"] = judged
         r["packet_pass_rate"] = round((r["n_pkt_accepted"] or 0) / judged, 3) if judged else None
         r["frame_pass_rate"] = round((r["f_ok"] or 0) / frames, 3) if frames else None
+        if r.get("harness"):
+            r["method_label"] = " · ".join(x for x in (
+                " ".join(y for y in (r["harness"], r.get("harness_version")) if y),
+                " ".join(y for y in (r.get("model"), r.get("model_version")) if y),
+            ) if x)
+        else:
+            r["method_label"] = r["model_used"]
         r["mean_conf"] = round(r["conf"], 3) if r["conf"] is not None else None
         r["interp_ratio"] = round(r["interp_ratio"], 3) if r["interp_ratio"] is not None else None
         r.pop("conf", None)
@@ -1255,7 +1265,7 @@ def parse_args():
     p.add_argument("--host", default="127.0.0.1", help="公网部署时由 nginx 反代，默认只听本机")
     p.add_argument("--port", type=int, default=8780)
     p.add_argument("--db", default=None, help=f"SQLite 路径，默认 {db.default_db_path()}")
-    p.add_argument("--bundles", default=None, help="缩略件目录，默认 <db 同级>/thumbs")
+    p.add_argument("--bundles", default=None, help="缩略件目录，默认 <db 同级>/thumbs（db 默认在 $BALL_GT_WORK 下）")
     p.add_argument("--thumbs", default=None, help="同 --bundles")
     p.add_argument("--keep-available", type=int, default=None, help="产包端要维持的待领包数（want_more 的基准）")
     p.add_argument("--batch", type=int, default=None, help="单轮补包上限")

@@ -1,0 +1,296 @@
+{
+  "packet_id": "260903__VID_20260903_203134_00_001__1235_1245",
+  "submitted": false,
+  "confirmed_target_frames": 24,
+  "reason": "cannot_locate_reliably_after_37118",
+  "labels": {
+    "37019": {
+      "frame_idx": 37019,
+      "visible": true,
+      "pano_x": 3748.0,
+      "pano_y": 2057.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37020": {
+      "blurred": false,
+      "frame_idx": 37020,
+      "occluded": false,
+      "pano_x": 3749.9075222057727,
+      "pano_y": 2057.9481019151845,
+      "visible": true
+    },
+    "37023": {
+      "blurred": false,
+      "frame_idx": 37023,
+      "occluded": false,
+      "pano_x": 3767.0950222057727,
+      "pano_y": 2065.1668519151845,
+      "visible": true
+    },
+    "37026": {
+      "blurred": false,
+      "frame_idx": 37026,
+      "occluded": false,
+      "pano_x": 3786.3450222057727,
+      "pano_y": 2072.3856019151845,
+      "visible": true
+    },
+    "37030": {
+      "blurred": false,
+      "frame_idx": 37030,
+      "occluded": false,
+      "pano_x": 3814.5325222057727,
+      "pano_y": 2081.6668519151845,
+      "visible": true
+    },
+    "37034": {
+      "frame_idx": 37034,
+      "visible": true,
+      "pano_x": 3843.0,
+      "pano_y": 2093.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37037": {
+      "frame_idx": 37037,
+      "visible": true,
+      "pano_x": 3864.0,
+      "pano_y": 2099.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37041": {
+      "blurred": false,
+      "frame_idx": 37041,
+      "occluded": false,
+      "pano_x": 3890.1575222057727,
+      "pano_y": 2106.7606019151845,
+      "visible": true
+    },
+    "37044": {
+      "blurred": false,
+      "frame_idx": 37044,
+      "occluded": false,
+      "pano_x": 3913.5325222057727,
+      "pano_y": 2114.6668519151845,
+      "visible": true
+    },
+    "37049": {
+      "frame_idx": 37049,
+      "visible": true,
+      "pano_x": 3917.0,
+      "pano_y": 2111.0,
+      "occluded": true,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37051": {
+      "blurred": false,
+      "frame_idx": 37051,
+      "occluded": false,
+      "pano_x": 3909.4075222057727,
+      "pano_y": 2111.2293519151845,
+      "visible": true
+    },
+    "37054": {
+      "blurred": false,
+      "frame_idx": 37054,
+      "occluded": false,
+      "pano_x": 3891.5325222057727,
+      "pano_y": 2106.7606019151845,
+      "visible": true
+    },
+    "37057": {
+      "blurred": false,
+      "frame_idx": 37057,
+      "occluded": false,
+      "pano_x": 3873.6575222057736,
+      "pano_y": 2109.8543519151845,
+      "visible": true
+    },
+    "37022": {
+      "frame_idx": 37022,
+      "visible": true,
+      "pano_x": 3764.0,
+      "pano_y": 2063.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37025": {
+      "frame_idx": 37025,
+      "visible": true,
+      "pano_x": 3782.0,
+      "pano_y": 2072.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37028": {
+      "frame_idx": 37028,
+      "visible": true,
+      "pano_x": 3802.0,
+      "pano_y": 2079.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37031": {
+      "frame_idx": 37031,
+      "visible": true,
+      "pano_x": 3823.0,
+      "pano_y": 2085.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37040": {
+      "frame_idx": 37040,
+      "visible": true,
+      "pano_x": 3887.0,
+      "pano_y": 2106.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37043": {
+      "frame_idx": 37043,
+      "visible": true,
+      "pano_x": 3907.0,
+      "pano_y": 2112.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37052": {
+      "frame_idx": 37052,
+      "visible": true,
+      "pano_x": 3902.0,
+      "pano_y": 2106.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37055": {
+      "frame_idx": 37055,
+      "visible": true,
+      "pano_x": 3884.0,
+      "pano_y": 2091.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37058": {
+      "frame_idx": 37058,
+      "visible": true,
+      "pano_x": 3870.0,
+      "pano_y": 2095.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37061": {
+      "frame_idx": 37061,
+      "visible": true,
+      "pano_x": 3856.0,
+      "pano_y": 2096.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37064": {
+      "frame_idx": 37064,
+      "visible": true,
+      "pano_x": 3849.0,
+      "pano_y": 2109.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37091": {
+      "frame_idx": 37091,
+      "visible": true,
+      "pano_x": 3820.0,
+      "pano_y": 2112.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37082": {
+      "frame_idx": 37082,
+      "visible": true,
+      "pano_x": 3811.0,
+      "pano_y": 2113.0,
+      "occluded": true,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37088": {
+      "frame_idx": 37088,
+      "visible": true,
+      "pano_x": 3817.0,
+      "pano_y": 2111.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37100": {
+      "frame_idx": 37100,
+      "visible": true,
+      "pano_x": 3841.0,
+      "pano_y": 2102.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37103": {
+      "frame_idx": 37103,
+      "visible": true,
+      "pano_x": 3847.0,
+      "pano_y": 2098.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37106": {
+      "frame_idx": 37106,
+      "visible": true,
+      "pano_x": 3853.0,
+      "pano_y": 2099.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37112": {
+      "frame_idx": 37112,
+      "visible": true,
+      "pano_x": 3860.0,
+      "pano_y": 2094.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37115": {
+      "frame_idx": 37115,
+      "visible": true,
+      "pano_x": 3865.0,
+      "pano_y": 2094.0,
+      "occluded": false,
+      "blurred": false,
+      "source": "agent"
+    },
+    "37118": {
+      "frame_idx": 37118,
+      "visible": true,
+      "pano_x": 3869.0,
+      "pano_y": 2092.0,
+      "occluded": true,
+      "blurred": false,
+      "source": "agent"
+    }
+  }
+}
