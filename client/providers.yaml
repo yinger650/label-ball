@@ -141,6 +141,92 @@ providers:
 
 # 工作流按角色引用供应商，列表即降级顺序：前面的失败就换后面的。
 # glm45v 排第一（实测更快）；免费的 glm_flash 常年 429，放第二当备胎。
+  # ---- 2026-10 四家多模态对比（scripts/probe_vlm_coord.py），key 用 .env 里的 *_API ----
+  cmp_deepseek:
+    base_url: https://api.deepseek.com
+    model: deepseek-flash
+    api_key_env: DEEPSEEK_API
+    max_concurrency: 2
+    timeout: 180
+    max_tokens: 2048
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: DeepSeek-V4.1-Flash，DeepSeek 唯一支持图的模型
+
+  cmp_glm53_flash:
+    # GLM_API 是 Coding Plan key，只能走 coding 网关；套餐不含 glm-5v-turbo
+    base_url: https://open.bigmodel.cn/api/coding/paas/v4
+    model: glm-5.3-flash
+    api_key_env: GLM_API
+    max_concurrency: 2
+    timeout: 240
+    max_tokens: 4096
+    image_format: png
+    extra_body:
+      reasoning_effort: low
+    notes: 2026-08 原生多模态，智谱最新；始终思考，只能 low/high/max
+
+  cmp_glm5v_turbo:
+    base_url: https://open.bigmodel.cn/api/paas/v4
+    model: glm-5v-turbo
+    api_key_env: GLM_API
+    max_concurrency: 2
+    timeout: 180
+    max_tokens: 2048
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 智谱视觉模型（2026-04）；当前 GLM_API 套餐无权限（1311），按量余额不足（1113）
+
+  cmp_mimo_pro:
+    base_url: https://token-plan-cn.xiaomimimo.com/v1
+    model: mimo-v2.6-pro
+    api_key_env: MIMO_API
+    max_concurrency: 2
+    timeout: 180
+    max_tokens: 2048
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+    notes: 小米 MiMo V2.6 Pro，全模态；MIMO_API 是 Token Plan key（tp-），走 token-plan-cn
+
+  cmp_mimo_flash:
+    base_url: https://token-plan-cn.xiaomimimo.com/v1
+    model: mimo-v2.6-flash
+    api_key_env: MIMO_API
+    max_concurrency: 2
+    timeout: 180
+    max_tokens: 2048
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+
+  cmp_minimax_m3:
+    base_url: https://api.minimaxi.com/v1
+    model: MiniMax-M3
+    api_key_env: MINIMA_API
+    max_concurrency: 2
+    timeout: 180
+    max_tokens: 2048
+    image_format: png
+    detail: high
+    extra_body:
+      thinking: {type: disabled}
+
+  cmp_minimax_m31_flash:
+    base_url: https://api.minimaxi.com/v1
+    model: MiniMax-M3.1-Flash
+    api_key_env: MINIMA_API
+    max_concurrency: 2
+    timeout: 180
+    max_tokens: 4096
+    image_format: png
+    detail: high
+    extra_body:
+      reasoning_effort: low
+    notes: 关不了思考，只能调深度
+
 roles:
   # glm45v 在前而不是免费的 glm_flash：实测 glm_flash 的免费池常年 429（8 次里挂 5 次），
   # 每次失败都要走一轮退避，整包跑下来比直接用 glm45v 慢好几倍。免费省下的那点钱

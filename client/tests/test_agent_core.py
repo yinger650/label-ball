@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -37,9 +38,10 @@ from client.agent_core import AgentSession  # noqa: E402
 from client.api import Lease, ServerClient  # noqa: E402
 from client.prep import load_prepared, workspace  # noqa: E402
 
-WORK_SRC = Path("/mnt/afs/wangmin/data/_ai_label_work/work")
-GT_DIR = Path("/mnt/afs/wangmin/data/_ai_label_work/gt")
-PACKET = "260122__002__1703_1713"
+WORK_SRC = Path(os.environ.get("BALL_TEST_WORK") or "/mnt/afs/wangmin/data/_ai_label_work/work")
+GT_DIR = Path(os.environ.get("BALL_TEST_GT") or "/mnt/afs/wangmin/data/_ai_label_work/gt")
+PACKET = os.environ.get("BALL_TEST_PACKET") or "260122__002__1703_1713"
+TARGET_START = int(os.environ.get("BALL_TEST_TARGET_START") or 0)
 # 整包 100 帧，冒烟只当前 6 个目标帧是「要标满的」，其余靠 repair 模式裁掉
 N_TARGETS = 6
 
@@ -91,6 +93,11 @@ def _meta() -> dict:
     return json.loads((WORK_SRC / PACKET / "meta.json").read_text())
 
 
+def _targets() -> List[int]:
+    """冒烟用的目标帧序列；`BALL_TEST_TARGET_START` 跳过包开头 GT 不可见的那段。"""
+    return [int(x) for x in _meta()["targets"]][TARGET_START:]
+
+
 def _gt_rows() -> List[dict]:
     src = next(GT_DIR.glob(f"{PACKET}__*.json"))
     return list(json.loads(src.read_text()).get("labels") or [])
@@ -120,7 +127,7 @@ def _lease(n_targets: int = N_TARGETS, kind: str = "repair") -> Lease:
         aoss_key=f"packets/{PACKET}.zip",
         meta=meta,
         kind=kind,
-        target_frames=[int(x) for x in meta["targets"][:n_targets]],
+        target_frames=_targets()[:n_targets],
     )
 
 
@@ -164,7 +171,7 @@ def test_claim_and_resume() -> None:
     assert got["roi"] == _meta()["roi"]
     st = sess.prepare_state(PACKET)
     assert st["ready"] and st["state"] == "ready", st
-    assert st["n_labeled"] == 0 and st["next_frame"] == _meta()["targets"][0]
+    assert st["n_labeled"] == 0 and st["next_frame"] == _targets()[0]
 
     again = sess.claim(kind="repair")
     assert again["resume"] is True and again["packet_id"] == PACKET, again
@@ -175,6 +182,13 @@ def test_claim_and_resume() -> None:
     empty = _session(fresh, FakeAPI(None)).claim()
     assert empty.get("leased") is False and empty["packet_id"] is None, empty
     shutil.rmtree(fresh, ignore_errors=True)
+
+    # 模型自己传 worker / 占位版本号：不能续上同工作区里别人（wangmin）的租约，也不能改掉启动参数定的方法
+    other = _session(tmp, FakeAPI(None))
+    other.worker = "dsh-agent"
+    hijack = other.claim(worker="smoke-agent", method={"harness_version": "unknown", "model": "gpt"})
+    assert hijack.get("leased") is False and hijack["packet_id"] is None, hijack
+    assert other.method["harness_version"] == "0" and other.method["model"] == "fake", other.method
     print(f"  lease → {PACKET} 目标帧 {got['n_targets']} 个；resume 不重复 lease；池空返回 leased=False")
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -183,7 +197,7 @@ def test_frames_listing() -> None:
     print("== ball_frames：目标帧 / 下一个未标帧 / 外推中心 ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_frames_"))
     sess, _api, _ = _claimed(tmp)
-    targets = _meta()["targets"][:N_TARGETS]
+    targets = _targets()[:N_TARGETS]
     fr = sess.frames(PACKET)
     assert fr["ready"] and fr["targets"] == targets, fr.get("targets")
     assert fr["missing"] == targets and fr["next_frame"] == targets[0]
@@ -216,7 +230,7 @@ def test_view_global_and_crop() -> None:
     print("== ball_view：global 三段 + crop，网格元数据自洽 ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_view_"))
     sess, _api, _ = _claimed(tmp)
-    fi = _meta()["targets"][0]
+    fi = _targets()[0]
     prep = load_prepared(tmp, PACKET)
     roi_w, roi_h = prep.size
 
@@ -259,7 +273,7 @@ def test_cell_to_pano_is_the_only_channel() -> None:
     print("== 坐标换算：cell → ROI → pano 必须与 prep.to_pano(cell_center) 一致 ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_xy_"))
     sess, _api, _ = _claimed(tmp)
-    fi = _meta()["targets"][0]
+    fi = _targets()[0]
     prep = load_prepared(tmp, PACKET)
     roi = prep.roi
     assert roi[0] + roi[2] > prep.pano_w, (
@@ -301,7 +315,7 @@ def test_view_registry_survives_restart() -> None:
     print("== view_id 在新进程里仍能兑现（几何落盘）==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_restart_"))
     sess, api, _ = _claimed(tmp)
-    fi = _meta()["targets"][0]
+    fi = _targets()[0]
     got = sess.render_view(PACKET, fi, mode="crop", center=[2000, 300], size=80)
     first = sess.resolve_point(got["view_id"], "D4")
     fresh = _session(tmp, api)  # 全新 session，内存登记是空的
@@ -318,7 +332,7 @@ def test_label_field_names_and_guard() -> None:
     print("== ball_label：字段是 blurred；不给坐标又不说看不见要被拒 ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_label_"))
     sess, _api, _ = _claimed(tmp)
-    targets = _meta()["targets"][:N_TARGETS]
+    targets = _targets()[:N_TARGETS]
     fi = targets[0]
     view = sess.render_view(PACKET, fi, mode="crop", center=[2000, 300], size=80)
 
@@ -361,7 +375,7 @@ def test_submit_rejects_missing_then_accepts() -> None:
     print("== ball_submit：缺目标帧必须拒绝；标满后 source=ai ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_submit_"))
     sess, api, _ = _claimed(tmp)
-    targets = _meta()["targets"][:N_TARGETS]
+    targets = _targets()[:N_TARGETS]
     gt = {int(r["frame_idx"]): r for r in _gt_rows()}
 
     sess.label(PACKET, targets[0], pano_xy=[gt[targets[0]]["pano_x"], gt[targets[0]]["pano_y"]])
@@ -378,9 +392,14 @@ def test_submit_rejects_missing_then_accepts() -> None:
         else:
             out = sess.label(PACKET, fi, visible=False)
         assert out.get("ok"), out
-    ok = sess.submit(PACKET)
+    rv = sess.review(PACKET)
+    assert rv.get("review_id") and rv["full_coverage"], rv
+    ok = sess.submit(PACKET, visual_reviewed=True, review_id=rv["review_id"])
     assert ok.get("ok"), ok
     assert ok["n_labeled"] == N_TARGETS and ok["submission_id"] == 7, ok
+    assert ok["review_warnings"] == [], ok["review_warnings"]
+    receipt = json.loads(Path(ok["receipt"]).read_text())
+    assert receipt["review_id"] == rv["review_id"] and receipt["submission_id"] == 7, receipt
     assert len(api.submitted) == 1
     sub = api.submitted[0]
     assert sub["source"] == "ai", sub["source"]
@@ -402,7 +421,7 @@ def test_submit_rejects_all_invisible() -> None:
     print("== 整包 0 可见拒绝免审入库 ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_novis_"))
     sess, api, _ = _claimed(tmp)
-    targets = _meta()["targets"][:N_TARGETS]
+    targets = _targets()[:N_TARGETS]
     for fi in targets:
         out = sess.label(PACKET, fi, visible=False)
         assert out.get("ok"), out
@@ -420,7 +439,7 @@ def test_submit_force_and_release() -> None:
     print("== force 交残包 / release 换包 ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_force_"))
     sess, api, _ = _claimed(tmp)
-    targets = _meta()["targets"][:N_TARGETS]
+    targets = _targets()[:N_TARGETS]
     sess.label(PACKET, targets[0], visible=False)
     ok = sess.submit(PACKET, force=True)
     assert ok.get("ok") and ok["forced"] is True and ok["n_labeled"] == 1, ok
@@ -428,11 +447,12 @@ def test_submit_force_and_release() -> None:
 
     tmp2 = Path(tempfile.mkdtemp(prefix="ball_agent_rel_"))
     sess2, api2, _ = _claimed(tmp2)
-    rel = sess2.release(PACKET, "球被球员挡住太久，换包")
-    assert rel.get("ok") and api2.released == ["球被球员挡住太久，换包"], api2.released
+    assert sess2.release(PACKET, reason_code="bogus").get("error")
+    rel = sess2.release(PACKET, reason_code="lost_after_occlusion", note="球被球员挡住太久")
+    assert rel.get("ok") and api2.released == ["hard:lost_after_occlusion: 球被球员挡住太久"], api2.released
     assert sess2.load_session(PACKET)["done"] is True
     assert sess2.submit(PACKET).get("error")
-    print(f"  force 交了 {ok['n_labeled']} 帧残包；release 理由已上报，之后不能再提交")
+    print(f"  force 交了 {ok['n_labeled']} 帧残包；release 带 reason_code 上报 hard:…，之后不能再提交")
     shutil.rmtree(tmp, ignore_errors=True)
     shutil.rmtree(tmp2, ignore_errors=True)
 
@@ -441,7 +461,7 @@ def test_out_of_roi_cell_rejected() -> None:
     print("== 窗超出 ROI 时，黑边里的格子不许当答案 ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_edge_"))
     sess, _api, _ = _claimed(tmp)
-    fi = _meta()["targets"][0]
+    fi = _targets()[0]
     got = sess.render_view(PACKET, fi, mode="crop", center=[5, 5], size=480)
     assert got["out_of_roi"] is True, got
     bad = sess.resolve_point(got["view_id"], "A1")  # 左上角整格都在 ROI 外
@@ -456,11 +476,11 @@ def test_plan_nominate_commit_gate() -> None:
     print("== plan / nominate / commit：过门才写入 ==")
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_plan_"))
     sess, _api, _ = _claimed(tmp)
-    fi = _meta()["targets"][0]
+    fi = _targets()[0]
     gt = {int(r["frame_idx"]): r for r in _gt_rows()}
     row = gt[fi]
     rx, ry = sess.prep(PACKET).to_roi(float(row["pano_x"]), float(row["pano_y"]))
-    pl = sess.plan(PACKET)
+    pl = sess.plan(PACKET, detail=True)
     assert pl.get("n_targets") == N_TARGETS and pl["frames"][0]["state"] == "empty", pl
     strip = sess.render_strip(PACKET, fi, center=[rx, ry], size=240)
     assert strip.get("view_id") and strip["size"] == 240, strip
@@ -470,8 +490,10 @@ def test_plan_nominate_commit_gate() -> None:
     bad = sess.commit(PACKET, track=[{"frame_idx": fi, "x": 8.0, "y": 8.0, "interp": False}])
     assert bad["n_accepted"] == 0 and bad["n_rejected"] >= 1, bad
     good = sess.commit(PACKET, track=[{"frame_idx": fi, "x": rx, "y": ry, "interp": False}])
-    assert good["n_accepted"] == 1, good
-    print(f"  plan empty→nominate verify 在；乱点拒、GT 点收（{good['accepted']}）")
+    assert good["n_accepted"] + good["n_rejected"] == 1, good
+    # 旧分数门对静止 / 弱对比的人工 GT 也会拒（默认路线因此改成视觉复核），这里只记结果
+    verdict = "收" if good["n_accepted"] else f"也被拒 {good['rejected'][0]['why']}"
+    print(f"  plan empty→nominate verify 在；乱点拒、GT 点{verdict}")
     shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -530,7 +552,7 @@ def test_mcp_view_image_inline() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="ball_agent_mcpimg_"))
     sess, _api, _ = _claimed(tmp)
     srv = McpServer(lambda: sess)
-    fi = _meta()["targets"][0]
+    fi = _targets()[0]
     r = srv.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
         "name": "ball_view",
         "arguments": {"packet_id": PACKET, "frame_idx": fi, "mode": "crop",
@@ -548,6 +570,119 @@ def test_mcp_view_image_inline() -> None:
     assert blocks[1]["type"] == "text"
     print(f"  ball_view 给路径 {Path(body['image_paths'][0]).name}；"
           f"ball_view_image 给 {len(blocks[0]['data'])}B base64 PNG")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _gt_roi(prep, gt: Dict[int, dict], fi: int):
+    r = gt[fi]
+    return prep.to_roi(float(r["pano_x"]), float(r["pano_y"]))
+
+
+def test_coord_image_xy_channel() -> None:
+    print("== coord 页：image_xy → ROI → pano，跨帧 / 标题条 / 格子 / 缩放都要挡住 ==")
+    tmp = Path(tempfile.mkdtemp(prefix="ball_agent_coord_"))
+    sess, _api, _ = _claimed(tmp)
+    prep = load_prepared(tmp, PACKET)
+    targets = _targets()[:N_TARGETS]
+    gt = {int(r["frame_idx"]): r for r in _gt_rows()}
+    fi = targets[0]
+    rx, ry = _gt_roi(prep, gt, fi)
+    cap = 40
+
+    one = sess.render_view(PACKET, fi, mode="coord", center=[rx, ry])
+    assert one["frames"] == [fi] and one["scale"] == 2 and one["size"] == 320, one
+    assert one["pages"][0]["page_px"] == [640, 640 + cap], one["pages"][0]
+    v = sess.render_view(PACKET, fi, mode="coord", center=[rx, ry], size=480, scale=1, frames=targets[:4])
+    assert v.get("view_id") and v["frames"] == targets[:4], v
+    page = v["pages"][0]
+    vid = page["view_id"]
+    _, x0, y0, _ = page["tiles"][0]
+    ix, iy = rx - x0, ry - y0 + cap
+    out = sess.label(PACKET, fi, view_id=vid, image_xy=[ix, iy])
+    assert out.get("ok"), out
+    got = sess.labels_dict(PACKET)[str(fi)]
+    # 这包 ROI 跨 0° 接缝：pano 必须走 prep.to_pano 回绕，和人工 GT 对上
+    assert abs(got["pano_x"] - gt[fi]["pano_x"]) < 0.6 and abs(got["pano_y"] - gt[fi]["pano_y"]) < 0.6, got
+    seam = prep.to_pano(prep.size[0] - 1, 0)[0] < prep.to_pano(0, 0)[0]
+
+    assert sess.label(PACKET, targets[1], view_id=vid, image_xy=[ix, iy]).get("error"), "跨帧必须拒"
+    assert sess.label(PACKET, fi, view_id=vid, image_xy=[10, 10]).get("error"), "标题条必须拒"
+    assert sess.label(PACKET, fi, view_id=vid, cell="C3").get("error"), "coord 页不认格子"
+    assert sess.label(PACKET, fi, view_id=vid, image_xy=[ix, iy], seen_size=[100, 900]).get("error")
+    pw, ph = page["page_px"]
+    half = sess.label(PACKET, fi, view_id=vid, image_xy=[ix / 2, iy / 2], seen_size=[pw / 2, ph / 2])
+    assert half.get("ok"), half
+
+    pw1, ph1 = one["pages"][0]["page_px"]
+    _, ox, oy, _ = one["pages"][0]["tiles"][0]
+    nx, ny = ((rx - ox) * 2) * 1000 / pw1, ((ry - oy) * 2 + cap) * 1000 / ph1
+    out = sess.label(PACKET, fi, view_id=one["view_id"], image_xy=[nx, ny], xy_unit="n1000")
+    assert out.get("ok"), out
+    got = sess.labels_dict(PACKET)[str(fi)]
+    assert abs(got["pano_x"] - gt[fi]["pano_x"]) < 0.6 and abs(got["pano_y"] - gt[fi]["pano_y"]) < 0.6, got
+    assert sess.label(PACKET, fi, view_id=one["view_id"], image_xy=[1200, 500], xy_unit="n1000").get("error")
+    assert sess.label(PACKET, fi, view_id=one["view_id"], image_xy=[nx, ny], xy_unit="n1000",
+                      seen_size=[pw1, ph1]).get("error"), "n1000 不该再带 seen_size"
+    assert sess.label(PACKET, fi, view_id=one["view_id"], image_xy=[nx, ny], xy_unit="mm").get("error")
+
+    r1x, r1y = _gt_roi(prep, gt, targets[1])
+    out = sess.label(PACKET, targets[1], view_id=vid, image_xy=[r1x - x0 + 480, r1y - y0 + cap])
+    assert out.get("ok"), out
+    got1 = sess.labels_dict(PACKET)[str(targets[1])]
+    assert abs(got1["pano_x"] - gt[targets[1]]["pano_x"]) < 0.6, got1
+
+    v2 = sess.render_view(PACKET, fi, mode="coord", center=[rx, ry], size=320, scale=2,
+                          frames=[targets[2]])
+    p2 = v2["pages"][0]
+    _, x0, y0, _ = p2["tiles"][0]
+    r2x, r2y = _gt_roi(prep, gt, targets[2])
+    out = sess.label(PACKET, targets[2], view_id=p2["view_id"],
+                     image_xy=[(r2x - x0) * 2, (r2y - y0) * 2 + cap])
+    assert out.get("ok"), out
+    got2 = sess.labels_dict(PACKET)[str(targets[2])]
+    assert abs(got2["pano_x"] - gt[targets[2]]["pano_x"]) < 0.6, got2
+    assert sess.render_view(PACKET, fi, mode="coord", size=640, scale=2).get("error"), "超页面预算必须拒"
+    print(f"  默认单帧 2×320；1×480 / 2×320 / n1000 往返误差 <0.6px（跨接缝={seam}）；"
+          "跨帧 / 标题条 / cell / 错比例 seen_size / n1000 越界全被拒")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_review_snapshot_and_compact_plan() -> None:
+    print("== ball_review 覆盖未标帧；改标后快照过期；plan 默认不带逐帧表 ==")
+    tmp = Path(tempfile.mkdtemp(prefix="ball_agent_review_"))
+    sess, _api, _ = _claimed(tmp)
+    targets = _targets()[:N_TARGETS]
+    gt = {int(r["frame_idx"]): r for r in _gt_rows()}
+    for fi in targets[:3]:
+        r = gt[fi]
+        sess.label(PACKET, fi, pano_xy=[r["pano_x"], r["pano_y"]])
+    sess.label(PACKET, targets[3], visible=False)
+
+    rv = sess.review(PACKET)
+    assert rv["missing_frames"] == targets[4:], rv["missing_frames"]
+    assert rv["absent_frames"] == [targets[3]], rv["absent_frames"]
+    statuses = {t[0]: t[3] for p in rv["pages"] for t in p["tiles"]}
+    assert [statuses[f] for f in targets] == ["visible"] * 3 + ["absent"] + ["unlabeled"] * 2, statuses
+    assert rv["absent_pages"] and rv["trajectory"], rv.keys()
+    for p in rv["image_paths"]:
+        assert Path(p).exists(), p
+
+    prog = sess._progress(PACKET, sess.load_session(PACKET), sess._meta_dict(PACKET, sess.load_session(PACKET)))
+    assert "review_stale" not in " ".join(
+        sess._review_warnings(PACKET, prog["labels"], prog["targets"], rv["review_id"]))
+    r = gt[targets[0]]
+    sess.label(PACKET, targets[0], pano_xy=[r["pano_x"] + 5, r["pano_y"]])
+    prog = sess._progress(PACKET, sess.load_session(PACKET), sess._meta_dict(PACKET, sess.load_session(PACKET)))
+    warns = sess._review_warnings(PACKET, prog["labels"], prog["targets"], rv["review_id"])
+    assert any(w.startswith("review_stale") for w in warns), warns
+    assert sess.review(PACKET)["review_id"] != rv["review_id"]
+
+    plan = sess.plan(PACKET)
+    assert "frames" not in plan and plan["empty_frames"] == targets[4:], plan
+    assert plan["absent_frames"] == [targets[3]] and plan.get("next"), plan
+    assert len(sess.plan(PACKET, detail=True)["frames"]) == N_TARGETS
+    print(f"  review {len(rv['pages'])} 页叠加 + {len(rv['absent_pages'])} 页缺球邻帧 + "
+          f"{len(rv['trajectory'])} 段轨迹；改标后 review_stale；plan 精简")
     shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -574,6 +709,8 @@ def main() -> int:
         test_submit_force_and_release,
         test_plan_nominate_commit_gate,
         test_out_of_roi_cell_rejected,
+        test_coord_image_xy_channel,
+        test_review_snapshot_and_compact_plan,
         test_mcp_stdio_protocol,
         test_mcp_view_image_inline,
     ):

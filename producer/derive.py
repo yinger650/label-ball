@@ -240,11 +240,14 @@ def _maxpool_bgr(bgr: np.ndarray, out_w: int, out_h: int) -> np.ndarray:
 def decimate_clip(src: Path, dest: Path, decim: int) -> None:
     """精确按帧抽取：`select not(mod(n, decim))`，再重置时间轴。"""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    vf = f"select='not(mod(n\\,{decim}))',setpts=N/FRAME_RATE/TB"
+    # FRAME_RATE is the source rate (e.g. 59.94), not the packet rate.
+    # Retiming to it after dropping frames made 300-frame clips last 5s while
+    # metadata and DoG videos used 30fps/10s. Keep every selected frame at 30fps.
+    vf = f"select='not(mod(n\\,{decim}))',setpts=N/({CLIP_FPS}*TB)"
     subprocess.run(
         [
             "ffmpeg", "-y", "-v", "error", "-i", str(src),
-            "-vf", vf, "-c:v", "libx264", "-crf", "16",
+            "-vf", vf, "-r", str(CLIP_FPS), "-c:v", "libx264", "-crf", "16",
             "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an", str(dest),
         ],
         check=True,

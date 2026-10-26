@@ -39,9 +39,11 @@ Agent 来不及收口时，看板约 30 分钟无新日志会把该 Run 标成 *
 
 - 只标比赛中正在使用的那一个球；场边备用球不标。球**可以是静止的**。
 - 冷启动 `ball_overview` 看人 + `ball_scan` 读轨迹；主力用 240–480 px 带球员上下文图。
-- 默认直接 ROI 球心坐标，用 `ball_label(roi_xy=[x,y])`，格子仅辅助定位。看不见就 `ball_absent`。
-- 读取已保存 labels 画逐帧叠加与轨迹连线，视觉复核后修正；conf/verify 仅参考，不按分数拦截。
-- `ball_submit(visual_reviewed=true)` 走 `source=ai` 进审核，仍要求标满。试验残包保存结果后 release。
+- 默认逐帧 `ball_view(mode=coord)`（单帧 320 px 放大 2×），`ball_label(view_id, image_xy=[x,y])` 直接点（单位看 `ball_view` 返回的 `xy_unit`：px 页面像素 / n1000 归一化；或给 `roi_xy`），格子仅辅助定位。看不见就 `ball_absent`。
+- 标满后 `ball_review` 逐页看叠加、缺球邻帧和轨迹连线，改标后重跑；conf/verify 仅参考，不按分数拦截。
+- `ball_submit(visual_reviewed=true, review_id=…)` 走 `source=ai` 进审核，仍要求标满。试验残包保存结果后 release。
+- `ball_release` 带 `reason_code`（cannot_locate / lost_after_occlusion / ambiguous_match_ball 记为难包，同一方法 24h 内不再领；download_error / decode_error 记为故障，同一 worker 冷却 15 分钟）。
 - `ball_lease` 要带 `harness` / `harness_version` / `model` / `model_version`（真实值），缺了领不到包。被「重标」的包同一方法领不到。
 - 冷启动找不到球就 `ball_release`，别硬标。
 - Codex skill 安装链接、项目规则与 MCP 配置见 `skills/ball-label/adapters/codex.md`。
+- 第一版固定 harness 是 DeepSeek Harness + deepseek-flash：`skills/ball-label/adapters/dsh.md`，批量用 `scripts/dsh_label.sh`。

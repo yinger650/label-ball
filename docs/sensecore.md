@@ -84,7 +84,7 @@ sidecar 里可以有 `BALL_GT_API_TOKEN`，只存在 AFS 上的这份 env 文件
 `make_packets.py --loop` 每轮先发作业内心跳。服务端 `POST /api/v2/producer/heartbeat` 顺手把当前池深算进响应：
 
 ```
-want_more = min(max(0, keep_available - n_available), batch)
+want_more = min(max(0, keep_available - n_schedulable), batch)
 ```
 
 产包端按这个数切本轮的包。心跳里没有 `want_more` 再打 `GET /api/v2/pool`。两条都拿不到时：
@@ -93,6 +93,11 @@ want_more = min(max(0, keep_available - n_available), batch)
 - 服务端不可达：同样退回 `--keep-available`，打一条 warn，**继续生产**（宁多几个包，不要停机空等）
 
 不要再用 `aoss_store.pool_status()` 数「没被 claim 的 zip」。新系统不写 `claims/`，那个数恒等于全部已产包。
+
+`n_available` 保留原始待领数，可能包含冷却中、同方法被拒绝或已有待审提交的包。
+`n_schedulable` 按最近 24 小时内的 AI worker / 方法计算实际可领库存，取各消费者中的最小值，
+确保其中一路缺包时仍能补新包。它只影响补包数量，不放宽领包、重标或困难包冷却限制。
+没有近期 AI 消费者时仍按原始待领数补池。
 
 作业内心跳带 `loop_iter` / `stage` / `n_produced`，会刷新 `last_heartbeat`。外部采集端带 `acp_state` 且不带 `loop_iter` 时只刷 `last_acp_poll`，避免「进程已经卡死、外部轮询还在到」被判成活着。
 

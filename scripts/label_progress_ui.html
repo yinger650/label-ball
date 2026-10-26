@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>足球标注 · 实时进度</title>
+<style>
+:root{color-scheme:dark;--bg:#101414;--card:#192020;--line:#2a3533;--text:#eff5f1;--muted:#96a9a1;--green:#b9ef7b;--amber:#ffd28b;--red:#ff9992}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1320px;margin:auto;padding:38px 32px 60px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:28px}.eyebrow{font-size:11px;letter-spacing:2px;color:var(--green)}h1{font-size:29px;letter-spacing:-1px;margin:7px 0}h2{font-size:17px;margin:0}.muted,small{color:var(--muted)}.live{display:flex;align-items:center;gap:9px;color:var(--green);font-size:12px}.dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 12px #b9ef7b44}.topright{text-align:right}button{background:#26312c;border:1px solid #405047;color:var(--text);border-radius:8px;padding:7px 13px;cursor:pointer;margin-top:12px}button:hover{background:#35463a}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}.stat,.worker{background:var(--card);border:1px solid var(--line);border-radius:14px}.stat{padding:19px 22px}.stat label{color:var(--muted);font-size:12px}.number{font-size:35px;letter-spacing:-1px;font-weight:600;margin:4px 0}.number span{font-size:15px;color:var(--muted);font-weight:400;letter-spacing:0}.bar{height:5px;background:#303c35;border-radius:10px;overflow:hidden;margin:10px 0}.fill{height:100%;background:var(--green);border-radius:10px;transition:width .5s}.section-title{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:27px 0 14px}.workers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.worker{padding:21px;min-width:0}.row{display:flex;justify-content:space-between;align-items:center;gap:10px}.worker-num{font-size:12px;color:var(--muted);letter-spacing:1px}.badge{font-size:11px;border-radius:20px;background:#2d3f28;color:var(--green);padding:4px 10px;white-space:nowrap}.badge.wait{background:#403728;color:var(--amber)}.badge.off{background:#3e2c2c;color:var(--red)}.stage{font-size:21px;font-weight:550;margin:18px 0 9px}.packet{font:11px/1.65 ui-monospace,SFMono-Regular,monospace;color:var(--muted);min-height:39px;overflow-wrap:anywhere}.progress{font-size:31px;margin:18px 0 0;font-variant-numeric:tabular-nums}.progress small{font-size:15px}.counts{display:flex;gap:16px;font-size:11px;color:var(--muted);margin:12px 0 20px}.counts b{color:var(--text);font-weight:500}.activity{border-top:1px solid var(--line);padding-top:14px;min-height:67px;font-size:12px;color:var(--muted)}.activity p{margin:6px 0 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.worker details{margin-top:12px;font-size:11px;color:var(--muted)}.worker summary{cursor:pointer}.worker ul{padding-left:16px}.worker li{margin:5px 0;overflow-wrap:anywhere}.notice{border:1px solid #625034;background:#2e291e;color:var(--amber);padding:12px 17px;border-radius:10px;margin-bottom:20px;display:none}.table-wrap{border:1px solid var(--line);border-radius:12px;overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th{text-align:left;font-weight:400;color:var(--muted);background:#19201e}th,td{padding:13px 18px;border-bottom:1px solid var(--line)}tr:last-child td{border-bottom:0}.packet-cell{font:11px ui-monospace,SFMono-Regular,monospace;max-width:450px;overflow-wrap:anywhere}.submission{color:var(--green);font-weight:600}.empty{color:var(--muted);text-align:center;padding:32px}footer{display:flex;justify-content:space-between;gap:15px;margin-top:22px;font-size:11px;color:var(--muted)}.stale{color:var(--amber)}@media(max-width:950px){.workers{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.packet{min-height:0}main{padding:24px 18px}.worker{padding:20px}.activity{min-height:0}}@media(max-width:500px){header{align-items:flex-start}.topright{max-width:120px}h1{font-size:25px}.stat{padding:15px}.number{font-size:29px}footer{display:block}.section-title small{font-size:10px}}
+table{min-width:820px}th{white-space:nowrap}.packet-cell{min-width:250px}td:nth-child(3),td:nth-child(4),td:nth-child(5),td:nth-child(6){white-space:nowrap}
+</style>
+<main>
+<header><div><div class="eyebrow">BALL LABEL / LIVE OPERATIONS</div><h1>足球标注进度</h1><div class="muted" id="subtitle">正在读取本地进度…</div></div><div class="topright"><div class="live" id="connection"><i class="dot"></i>实时连接 · 每 5 秒刷新</div><button id="refresh">立即刷新 ↻</button></div></header>
+<div class="notice" id="notice" role="status"></div>
+<section class="stats" aria-label="统计">
+<div class="stat"><label>已提交包</label><div class="number" id="submitted">—</div><small id="submittedframes">以服务端提交回执为准</small></div>
+<div class="stat"><label>当前包已标帧</label><div class="number" id="frames">—</div><small>标满后还需视觉复核与提交</small></div>
+<div class="stat"><label>正在工作</label><div class="number" id="active">—</div><small id="poolstate">正在检查进程</small></div>
+<div class="stat"><label>本周额度已用</label><div class="number" id="quota">—</div><div class="bar"><div class="fill" id="quotabar" style="width:0"></div></div><small id="quotatime">等待额度读数</small></div>
+</section>
+<div class="section-title"><h2>三路标注</h2><small class="muted">下载 → 逐帧标注 → 视觉复核 → 提交审核</small></div>
+<section class="workers" id="workers" aria-label="各路进度"></section>
+<div class="section-title"><h2>提交记录</h2><small class="muted" id="releases"></small></div>
+<div class="table-wrap"><table><thead><tr><th>提交号</th><th>包</th><th>帧数</th><th>标注路</th><th>提交时间</th><th>提交状态</th></tr></thead><tbody id="history"></tbody></table></div>
+<footer><span>直接读取本机标注文件 · 页面刷新不调用模型</span><span id="updated">—</span></footer>
+</main>
+<script>
+const $=id=>document.getElementById(id), esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const stamp=t=>t?new Date(t*1000).toLocaleString('zh-CN',{hour12:false}):'—';
+const age=t=>{if(!t)return '暂无活动';const n=Math.max(0,Math.floor(Date.now()/1000-t));return n<60?`${n} 秒前`:n<3600?`${Math.floor(n/60)} 分钟前`:`${Math.floor(n/3600)} 小时前`};
+const stateName={running:'标注中',preparing:'准备图片',waiting_packet:'等待新包',waiting_server:'等待连接',waiting_storage:'等待连接',between_packets:'退避等待',stopped:'已停止',process_exited:'进程退出',unknown:'状态未知'};
+function render(d){
+ $('subtitle').textContent=`${d.model||'模型未知'} · 3 路并行 · 本周额度耗尽时停止`;
+ $('submitted').textContent=d.summary.submitted_packets;
+ $('submittedframes').textContent=`累计 ${d.summary.submitted_frames} 帧 · 已提交至 AI 审核`;
+ $('frames').innerHTML=`${d.summary.active_labeled} <span>/ ${d.summary.active_total} 帧</span>`;
+ $('active').innerHTML=`${d.summary.working_workers??d.summary.active_workers} <span>/ ${d.workers.length} 路</span>`;
+ $('poolstate').textContent=d.supervisor_alive?(d.state==='waiting_storage'?'调度在线 · 等待存储恢复':d.state==='waiting_packet'?'调度在线 · 生产端补包中':`调度在线 · 模型标注 ${d.summary.active_workers} 路`):'后台调度已停止';
+ const q=d.quota.usedPercent; $('quota').innerHTML=q==null?'—':`${q}<span>%</span>`; $('quotabar').style.width=`${q??0}%`;
+ $('quotatime').textContent=`读数 ${age(d.quota_updated_at)} · 剩余 ${q==null?'—':Math.max(0,100-q)}%`;
+ $('quotatime').className=Date.now()/1000-d.quota_updated_at>180?'stale':'';
+ let message=!d.supervisor_alive||d.state==='stopped'?`调度已停止${d.reason?'：'+d.reason:''}。下方保留最后保存的标注进度。`:d.workers.every(w=>w.state==='waiting_packet')?`当前没有可领新包，生产端正在补充。原始库存 ${d.pool_inventory?.n_available??'—'} 包，实际可领 ${d.pool_inventory?.n_schedulable??'—'} 包。等待期间不调用模型。`:d.workers.every(w=>w.state==='waiting_storage')?'下载链路暂不可用。每分钟在本地检查连接，等待期间不启动模型。':d.workers.some(w=>w.state==='process_exited')?'有标注进程已退出，正在等待调度处理。':'';
+ $('notice').textContent=message;$('notice').style.display=message?'block':'none';
+ $('workers').innerHTML=d.workers.map((w,i)=>{
+ const p=w.packet||w.last_packet,percent=p?.total?Math.round(100*p.labeled/p.total):0,wait=['waiting_storage','between_packets','waiting_packet','preparing','waiting_server'].includes(w.state),off=['stopped','process_exited'].includes(w.state);
+ const note=[...w.events].reverse().find(e=>e.kind==='message')?.text||(['running','preparing','waiting_packet'].includes(w.state)?w.stage+'，正在更新进度。':w.last_reason)||'等待下一次活动';
+ return `<article class="worker"><div class="row"><span class="worker-num">WORKER 0${i+1}</span><span class="badge ${off?'off':wait?'wait':''}">${esc(stateName[w.state]||w.state)}</span></div><div class="stage">${esc(w.stage)}</div><div class="packet">${p?(w.packet?'':'上包 · ')+esc(p.packet_id):'当前没有处理中包'}</div><div class="row"><div class="progress">${p?p.labeled:'—'} <small>${p?'/ '+p.total+' 帧':''}</small></div><small>${p?percent+'%':''}</small></div><div class="bar"><div class="fill" style="width:${percent}%"></div></div><div class="counts"><span>可见 <b>${p?.visible??'—'}</b></span><span>不可见 <b>${p?.absent??'—'}</b></span><span>未标 <b>${p?.missing??'—'}</b></span></div><div class="activity"><div>最近活动 · ${esc(age(w.last_activity))}</div><p title="${esc(note)}">${esc(note)}</p></div><details><summary>最近工具活动 · 第 ${w.iteration} 轮</summary><ul>${w.events.map(e=>`<li>${esc(e.text)}</li>`).join('')||'<li>暂无记录</li>'}</ul></details></article>`;
+ }).join('');
+ $('history').innerHTML=d.submissions.length?d.submissions.map(r=>`<tr><td class="submission">#${esc(r.submission_id)}</td><td class="packet-cell">${esc(r.packet_id)}</td><td>${r.n_targets??'—'}</td><td>${esc(r.worker.replace('wangmin-codex61-p','第 '))} 路</td><td>${esc(stamp(r.submitted_at))}</td><td>已提交</td></tr>`).join(''):'<tr><td colspan="6" class="empty">还没有成功提交的回执</td></tr>';
+ $('releases').textContent=`已释放 ${d.summary.released_attempts} 次 · 不计为完成包`;
+ $('updated').textContent=`页面更新 ${stamp(d.at)}`;
+}
+let fetching=false;async function refresh(){if(fetching)return;fetching=true;try{const r=await fetch('/api/progress',{cache:'no-store'});if(!r.ok)throw Error(r.status);render(await r.json());$('connection').innerHTML='<i class="dot"></i>实时连接 · 每 5 秒刷新';$('connection').style.color='var(--green)'}catch(e){$('connection').textContent='连接中断 · 正在重试';$('connection').style.color='var(--red)';$('notice').textContent='无法读取最新进度，当前显示的是上次成功更新的数据。';$('notice').style.display='block'}finally{fetching=false}}
+$('refresh').onclick=refresh;refresh();setInterval(refresh,5000);
+</script>
+</html>

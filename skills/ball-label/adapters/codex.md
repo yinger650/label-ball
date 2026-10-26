@@ -31,9 +31,10 @@ codex mcp list
 ## 2. Skill 与项目规则
 
 将本目录链接到 `~/.codex/skills/ball-label`。项目 `AGENTS.md` 应指向本 skill。
-默认用 `ball_label(roi_xy)` 直接标球心，再用 `scripts/coordinate_review.py`
-读取保存结果画逐帧叠加和轨迹连线。视觉复核后 `ball_submit(visual_reviewed=true)`
-进入 AI 审核；分数仅参考，缺帧仍拒绝。格子只辅助区域定位。
+默认 `ball_view(mode=coord)` 出多帧坐标页，`ball_label(view_id, image_xy)` 直接点页面像素；
+`ball_review` 读取保存结果出逐帧叠加、缺球邻帧对照和轨迹连线，看完后
+`ball_submit(visual_reviewed=true, review_id=…)` 进入 AI 审核；分数仅参考，缺帧仍拒绝。
+Codex 读本地图片，不用开 `--inline-images`。`scripts/coordinate_review.py` 是同一套出图的命令行薄壳。
 
 ## 3. 环境（不要进 git）
 

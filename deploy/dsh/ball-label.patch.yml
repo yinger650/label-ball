@@ -1,0 +1,28 @@
+# dsh overlay for football GT labeling (first fixed harness: dsh + deepseek-flash).
+#   dsh --profile headless --patch deploy/dsh/ball-label.patch.yml "<task>"
+# scripts/dsh_label.sh sets BALL_REPO / BALL_DSH_* and the method env below.
+- insert:
+    - id: mcp-ball-label
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: ball
+        transport: stdio
+        command: !!js "`${process.env.BALL_REPO}/venv/bin/python`"
+        args: !!js >-
+          ['-m', 'client.mcp_server',
+           '--server', process.env.BALL_GT_SERVER || 'https://ballgt.yinger650.com',
+           '--worker', process.env.BALL_GT_ANNOTATOR || 'dsh-agent',
+           '--harness', 'dsh',
+           '--harness-version', process.env.BALL_DSH_VERSION || 'unknown',
+           '--model', process.env.BALL_DSH_MODEL || 'deepseek-flash',
+           '--model-version', process.env.BALL_DSH_MODEL_VERSION || 'V4.1-Flash',
+           '--inline-images', '--inline-max', process.env.BALL_GT_INLINE_MAX || '4',
+           '--xy-unit', process.env.BALL_GT_XY_UNIT || 'n1000',
+           '--page-px', '1288', '1288']
+        env: !!js >-
+          ({PYTHONPATH: process.env.BALL_REPO,
+            HOME: process.env.HOME,
+            BALL_AI_WORK: process.env.BALL_AI_WORK || `${process.env.HOME}/.cache/ball_ai/work`})
+        cwd: !!js process.env.BALL_REPO
+        toolCallTimeoutMs: 180000
+        failOnStartupError: true

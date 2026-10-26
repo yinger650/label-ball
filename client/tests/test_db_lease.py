@@ -257,7 +257,81 @@ def test_accept_repair_remove():
         c.close()
 
 
+def test_release_classification():
+    assert db.classify_release("hard:cannot_locate: lost after kick") == "hard"
+    assert db.classify_release("cannot_locate_match_ball_at_cold_start") == "hard"
+    assert db.classify_release("cannot_reliably_locate_air_ball_in_RGB_after_kick") == "hard"
+    assert db.classify_release("cannot_reliably_distinguish_match_ball_from_far_goal_fence") == "hard"
+    assert db.classify_release("cannot_locate_match_ball_reliably_after_occlusion") == "hard"
+    assert db.classify_release("error:download_error: GetObject 403") == "infra"
+    assert db.classify_release("packet_download_GetObject_failed") == "infra"
+    assert db.classify_release("no_seed") == "infra"
+    assert db.classify_release("user_stop") == "normal"
+    assert db.classify_release("released") == "normal"
+
+
+def _release(c, pid, worker, method, reason, ago=0.0):
+    p = db.one(c, "SELECT * FROM packets WHERE packet_id=?", (pid,))
+    lease = db.open_lease(c, p, worker, "ai", method=method)
+    db.release_lease(c, lease["lease_id"], reason)
+    if ago:
+        c.execute("UPDATE leases SET released_at=released_at-? WHERE lease_id=?", (ago, lease["lease_id"]))
+        c.commit()
+
+
+def test_hard_release_cools_same_method_only():
+    with tempfile.TemporaryDirectory() as td:
+        c = db.connect(Path(td) / "t.sqlite3")
+        db.migrate(c)
+        _pkt(c, "hard", priority=5)
+        _pkt(c, "easy")
+        codex = db.method_key("ai", "agent", CODEX)
+        dsh = db.method_key("ai", "agent", DSH)
+
+        _release(c, "hard", "ai-1", codex, "hard:cannot_locate: cold start")
+        # 换个 worker 名字、同一方法也领不到；其他方法和人工照常
+        assert db.pick_packet(c, "ai-9", "ai", method=codex)["packet_id"] == "easy"
+        assert db.pick_packet(c, "ai-1", "ai", method=dsh)["packet_id"] == "hard"
+        assert db.pick_packet(c, "bob", "human", method="human:bob")["packet_id"] == "hard"
+
+        # 旧客户端的自由文本也按 hard 冷却
+        _pkt(c, "legacy", priority=9)
+        _release(c, "legacy", "ai-1", codex, "cannot_locate_match_ball_at_cold_start")
+        assert db.pick_packet(c, "ai-1", "ai", method=codex)["packet_id"] == "easy"
+
+        # 冷却到期后能再领
+        c.execute("UPDATE leases SET released_at=released_at-? WHERE packet_id IN ('hard','legacy')",
+                  (db.HARD_COOLDOWN_SEC + 1,))
+        c.commit()
+        assert db.pick_packet(c, "ai-1", "ai", method=codex)["packet_id"] == "legacy"
+        c.close()
+
+
+def test_infra_release_short_cooldown_per_worker():
+    with tempfile.TemporaryDirectory() as td:
+        c = db.connect(Path(td) / "t.sqlite3")
+        db.migrate(c)
+        _pkt(c, "net", priority=5)
+        _pkt(c, "other")
+        codex = db.method_key("ai", "agent", CODEX)
+        _release(c, "net", "ai-1", codex, "error:download_error: GetObject failed")
+        assert db.pick_packet(c, "ai-1", "ai", method=codex)["packet_id"] == "other"
+        # 网络错误不算标注能力失败：同方法另一个 worker 立刻能领
+        assert db.pick_packet(c, "ai-2", "ai", method=codex)["packet_id"] == "net"
+        c.execute("UPDATE leases SET released_at=released_at-? WHERE packet_id='net'",
+                  (db.FAIL_COOLDOWN_SEC + 1,))
+        c.commit()
+        assert db.pick_packet(c, "ai-1", "ai", method=codex)["packet_id"] == "net"
+        # 普通释放（换包 / 用户叫停）不冷却
+        _release(c, "other", "ai-1", codex, "user_stop")
+        assert db.pick_packet(c, "ai-1", "ai", method=codex)["packet_id"] == "net"
+        c.close()
+
+
 if __name__ == "__main__":
+    test_release_classification()
+    test_hard_release_cools_same_method_only()
+    test_infra_release_short_cooldown_per_worker()
     test_want_packet_and_seed_priority()
     test_requeue_need_human_to_available()
     test_status_recall_and_delete()

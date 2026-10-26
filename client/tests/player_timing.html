@@ -1,0 +1,50 @@
+<!doctype html><meta charset="utf-8"><title>Player timing regression</title>
+<h1>Player timing regression</h1><pre id="result">Running…</pre>
+<script src="/gtplayer.js"></script>
+<script>
+const results=[];
+function check(ok,name){if(!ok)throw Error(name);results.push('PASS '+name)}
+function near(a,b){return Math.abs(a-b)<1e-8}
+function fixture(rawDuration=5.005,dogDuration=10,decim=2){
+ const p=Object.create(GTPlayer.prototype);
+ p.source={kind:'thumb',clipFps:30,decim,meta:{frame_start:102378,clip_frames:300,step:3}};
+ p.frames=Array.from({length:100},(_,i)=>({frame_idx:102378+i*3*decim}));
+ p.i=0;p.fps=12;p.pane='raw';
+ p._vids={clip:{duration:rawDuration,currentTime:0,src:'rgb'},dog:{duration:dogDuration,currentTime:0,src:'dog'}};
+ return p;
+}
+try{
+ const p=fixture();check(near(p.videoFps(p._vids.clip),60000/1001),'legacy RGB is 59.94fps');
+ check(near(p.videoFps(p._vids.dog),30),'DoG is 30fps');
+ for(let i=0;i<100;i++){
+  for(const video of Object.values(p._vids)){
+   const t=p.clipTimeOf(p.frames[i],video);
+   check(p.nearestIndexFromMedia(t,video)===i,`round trip frame ${i} ${video.src}`);
+  }
+ }
+ for(const speed of [1,12,60,120]){
+  p.fps=speed;const rgb=p.thumbPlayRate(p._vids.clip),dog=p.thumbPlayRate(p._vids.dog);
+  check(near(rgb*p.videoFps(p._vids.clip),dog*p.videoFps(p._vids.dog)),`shared frame speed at ${speed}fps`);
+  check(rgb>=.1&&rgb<=4&&dog>=.1&&dog<=4,`both media rates bounded at ${speed}fps`);
+ }
+ p.fps=12;check(near(p.thumbPlayRate(p._vids.dog),1.2),'step=3 is clip-frame spacing, not divided twice');
+ p.i=50;p.syncVideo();check(near(p._vids.clip.currentTime*p.videoFps(p._vids.clip),150.45),'RGB seeks selected ordinal');
+ check(near(p._vids.dog.currentTime*30,150.45),'DoG seeks same ordinal');
+ for(const v of Object.values(p._vids)){v.paused=false;v.pause=()=>{v.paused=true};v.currentTime=0}
+ p.drawTransport=()=>{};p.stop();
+ check(near(p._vids.clip.currentTime*p.videoFps(p._vids.clip),150.45),'pause snaps RGB to selected label');
+ check(near(p._vids.dog.currentTime*30,150.45),'pause snaps DoG to same label');
+ const normalized=fixture(10,10);check(near(normalized.clipTimeOf(normalized.frames[50]),5.015),'normalized 30fps packets unchanged');
+ const undecimated=fixture(10,10,1);check(near(undecimated.clipTimeOf(undecimated.frames[50]),5.015),'decim=1 stays correct');
+ p._vids.clip.duration=NaN;check(p.videoFps(p._vids.clip)===30,'metadata-not-loaded fallback');
+ const callbacks=[];const q=fixture();q.playing=true;q.outPt=99;q.loop=false;
+ q._vids.clip.requestVideoFrameCallback=cb=>callbacks.push(cb);
+ q._vids.dog.requestVideoFrameCallback=cb=>callbacks.push(cb);
+ q.recenterOn=()=>{};let draws=0;q.draw=()=>draws++;
+ q._bindThumbRvfc();const old=callbacks[0];q.pane='enh';q._bindThumbRvfc();
+ old(0,{mediaTime:1});check(draws===0,'switching pane invalidates old frame callback');
+ callbacks[1](0,{mediaTime:5});check(q.i===50&&draws===1,'active DoG callback uses its own media clock');
+ document.getElementById('result').textContent=`${results.length} checks passed\n`+results.join('\n');
+ document.title='PASS · Player timing';
+}catch(e){document.getElementById('result').textContent='FAIL '+e.message+'\n'+results.join('\n');document.title='FAIL · Player timing'}
+</script>

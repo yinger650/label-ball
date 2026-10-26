@@ -351,6 +351,11 @@ class GTPlayer {
       }
       v.addEventListener('seeked', () => this.draw());
       v.addEventListener('loadeddata', () => this.draw());
+      v.addEventListener('loadedmetadata', () => {
+        this.syncVideo();
+        if (this.playing) this.playVideos();
+        this.draw();
+      });
       return v;
     };
     this._vids = { clip: mk('gtVidClip'), dog: mk('gtVidDog') };
@@ -406,13 +411,22 @@ class GTPlayer {
     return this.pane === 'enh' ? this._vids.dog : this._vids.clip;
   }
 
-  clipTimeOf(f) {
-    const fps = (this.source && this.source.clipFps) || 30;
+  videoFps(v = this.activeVideo()) {
+    // Legacy decimated RGB clips can still be encoded at the source frame
+    // rate, whereas DoG is 30fps. Frame ordinal is shared; seconds are not.
+    const n = Number(this.source && this.source.meta && this.source.meta.clip_frames);
+    const duration = v && Number(v.duration);
+    if (n > 0 && Number.isFinite(duration) && duration > 0) return n / duration;
+    return (this.source && this.source.clipFps) || 30;
+  }
+
+  clipTimeOf(f, v = this.activeVideo()) {
+    const fps = this.videoFps(v);
     return this.clipIndexOf(f) / fps + 0.45 / fps;
   }
 
-  nearestIndexFromMedia(t) {
-    const fps = (this.source && this.source.clipFps) || 30;
+  nearestIndexFromMedia(t, v = this.activeVideo()) {
+    const fps = this.videoFps(v);
     const ci = Number(t) * fps;
     let best = this.i, bestD = 1e18;
     this.frames.forEach((f, i) => {
@@ -422,23 +436,26 @@ class GTPlayer {
     return best;
   }
 
-  thumbPlayRate() {
-    const clipFps = (this.source && this.source.clipFps) || 30;
-    const decim = (this.source && this.source.decim) || 1;
+  thumbPlayRate(v = this.activeVideo()) {
     const step = Number((this.source && this.source.meta && this.source.meta.step)
       || (this.man && this.man.step) || 3);
-    const clipStep = Math.max(1, step / decim);
-    return Math.max(0.1, Math.min(4, (this.fps * clipStep) / clipFps));
+    // meta.step is in clip frames; derive the gap from targets when available.
+    const clipStep = this.frames.length > 1
+      ? Math.max(1, this.clipIndexOf(this.frames[1]) - this.clipIndexOf(this.frames[0]))
+      : Math.max(1, step);
+    const rates = this._vids ? [this.videoFps(this._vids.clip), this.videoFps(this._vids.dog)] : [this.videoFps(v)];
+    // Clamp the shared frame speed, so RGB/DoG stay in sync even at speed limits.
+    const frameRate = Math.max(0.1 * Math.max(...rates), Math.min(4 * Math.min(...rates), this.fps * clipStep));
+    return frameRate / this.videoFps(v);
   }
 
   playVideos() {
     const vids = this.ensureVideos();
-    const rate = this.thumbPlayRate();
     ['clip', 'dog'].forEach((k) => {
       const v = vids[k];
       if (!v || !v.src) return;
       v.muted = true;
-      v.playbackRate = rate;
+      v.playbackRate = this.thumbPlayRate(v);
       const p = v.play();
       if (p && p.catch) p.catch(() => {});
     });
@@ -456,10 +473,10 @@ class GTPlayer {
     if (!(this.source && this.source.kind === 'thumb') || !this._vids) return;
     const f = this.cur();
     if (!f) return;
-    const t = this.clipTimeOf(f);
-    const fps = (this.source && this.source.clipFps) || 30;
     const apply = (v) => {
       if (!v || !v.src) return;
+      const t = this.clipTimeOf(f, v);
+      const fps = this.videoFps(v);
       if (Math.abs((v.currentTime || 0) - t) > 0.4 / fps) v.currentTime = t;
     };
     apply(this._vids.clip);
@@ -469,10 +486,11 @@ class GTPlayer {
   _bindThumbRvfc() {
     const v = this.activeVideo();
     if (!v) return;
+    const generation = this._thumbRvfcGeneration = (this._thumbRvfcGeneration || 0) + 1;
     const loop = (_now, meta) => {
-      if (!this.playing || !(this.source && this.source.kind === 'thumb')) return;
+      if (!this.playing || generation !== this._thumbRvfcGeneration || !(this.source && this.source.kind === 'thumb')) return;
       const mediaT = (meta && meta.mediaTime != null) ? meta.mediaTime : (v.currentTime || 0);
-      const i = this.nearestIndexFromMedia(mediaT);
+      const i = this.nearestIndexFromMedia(mediaT, v);
       if (i !== this.i) {
         this.i = i;
         const f = this.cur();
@@ -481,8 +499,8 @@ class GTPlayer {
       }
       this.draw();
       const hi = this.frames[this.outPt];
-      const hiT = hi ? this.clipTimeOf(hi) : 1e9;
-      if (mediaT >= hiT - 1 / 30) {
+      const hiT = hi ? this.clipTimeOf(hi, v) : 1e9;
+      if (mediaT >= hiT - 1 / this.videoFps(v)) {
         if (this.loop) {
           this.seek(this.inPt, true);
           this.playVideos();
@@ -1406,6 +1424,7 @@ class GTPlayer {
   stop() {
     this.playing = false;
     this.pauseVideos();
+    this.syncVideo();
     this.drawTransport();
   }
 
@@ -1460,7 +1479,13 @@ class GTPlayer {
       return;
     }
     this.pane = want;
-    if (thumb && this.playing) this._bindThumbRvfc();
+    if (thumb) {
+      this.syncVideo();
+      if (this.playing) {
+        this.playVideos();
+        this._bindThumbRvfc();
+      }
+    }
     this.draw();
   }
 

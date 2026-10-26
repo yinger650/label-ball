@@ -35,6 +35,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from client import review_views as RV  # noqa: E402
 from client import track as T  # noqa: E402
 from client import views as V  # noqa: E402
 from client.api import ServerClient  # noqa: E402
@@ -56,7 +57,24 @@ from packet import build_result  # noqa: E402
 
 log = logging.getLogger("client.agent_core")
 
-MODES = ("global", "crop", "time_grid")
+MODES = ("global", "crop", "time_grid", "coord")
+# 这些视图没有格子，cell 在上面没有坐标含义
+NO_GRID_MODES = ("time_grid", "coord", "review", "review_absent", "trajectory")
+# 2026-10 五家模型读点对比：单帧放大 2× 比 2×2 拼页准，标点默认一页一帧
+DEFAULT_COORD_SIZE = 320
+DEFAULT_COORD_SCALE = 2
+XY_UNITS = ("px", "n1000")
+PLACEHOLDER_METHOD = {"unknown", "none", "null", "n/a", "na", "?", "-"}
+DEFAULT_REVIEW_SIZE = 320
+DEFAULT_ABSENT_SIZE = 600
+RELEASE_CODES = {
+    "cannot_locate": "hard",
+    "lost_after_occlusion": "hard",
+    "ambiguous_match_ball": "hard",
+    "download_error": "error",
+    "decode_error": "error",
+    "user_stop": "",
+}
 
 # `pane` 参数的取值。agent 标注路线和 AI 工作流吃同样的图，判据才能是同一套。
 VIEW_PANE_SETS = {
@@ -115,6 +133,9 @@ class ViewRef:
     center_source: str = ""
     panes: List[str] = field(default_factory=list)
     strips: List[V.GridView] = field(default_factory=list)
+    # 无格子的 1:1 页面（coord / review）：tile 表 + 页面像素尺寸，image_xy 靠它换回 ROI
+    tiles: List[dict] = field(default_factory=list)
+    page_size: Optional[Tuple[int, int]] = None
 
 
 def _geom_of(view: V.GridView) -> dict:
@@ -192,8 +213,15 @@ class AgentSession:
         store: Any = None,
         prepare_fn: Optional[PrepareFn] = None,
         method: Optional[Dict[str, str]] = None,
+        page_px: Sequence[int] = RV.DEFAULT_PAGE_PX,
+        xy_unit: str = "px",
     ) -> None:
+        if xy_unit not in XY_UNITS:
+            raise ValueError(f"xy_unit 只能是 {XY_UNITS}，收到 {xy_unit!r}")
         self.api = api
+        self.page_px = (int(page_px[0]), int(page_px[1]))
+        # image_xy 的默认单位：px = 页面像素；n1000 = 整张页面 0–1000 归一化（部分模型的定位习惯）
+        self.xy_unit = xy_unit
         self.work_root = Path(work_root)
         self.work_root.mkdir(parents=True, exist_ok=True)
         self.worker = worker or "agent"
@@ -426,11 +454,15 @@ class AgentSession:
         `kind=human` 是「整包标注」的旧叫法；对服务端一律按 AI 领（`kind=ai`），
         并带上 harness / 模型版本，被同一方法重标过的包不会发过来。
         """
-        who = worker or self.worker or "agent"
+        # 启动参数定下的 worker / 方法不许模型改：同一工作区里别的 worker 的租约会被当成自己的续上
+        who = self.worker if self.worker != "agent" else (worker or "agent")
         kind = str(kind or "human")
         if kind not in ("human", "repair"):
             return {"error": "kind 只能是 human / repair"}
-        self.method.update({k: str(v) for k, v in (method or {}).items() if v})
+        for k, v in (method or {}).items():
+            v = str(v or "").strip()
+            if v and v.lower() not in PLACEHOLDER_METHOD and not self.method.get(k):
+                self.method[k] = v
         if not (self.method.get("harness") and self.method.get("model")):
             return {"error": (
                 "缺少标注方法：领包前要说明 harness 和 model（最好带版本）。"
@@ -462,8 +494,9 @@ class AgentSession:
                 "packet_id": None,
                 "leased": False,
                 "message": (
-                    "池子里暂时没有适合的包（repair 模式要有 need_human 的包；"
-                    "被同一 harness+模型重标过的包不会再发给你）"
+                    "池子里暂时没有适合的包：repair 模式要有 need_human 的包；"
+                    "被同一 harness+模型重标过的包、同一方法 24 小时内以 hard:* 释放过的包、"
+                    "15 分钟内下载/解码失败的包都不会发给你。不要反复领包/释放，结束本轮。"
                 ),
             }
 
@@ -590,8 +623,8 @@ class AgentSession:
             "recent_visible": [[fi, round(x, 2), round(y, 2)] for fi, x, y in pts[-6:]],
             "predicted": pred,
             "hint": (
-                "已标可见点 ≥2 个时，predicted.center 就是下一帧的外推中心，直接喂给 "
-                "ball_view(mode='crop', center=..., size=240)；一个都没有就先 "
+                "已标可见点 ≥2 个时，predicted.center 是下一帧的外推中心，只用来放窗："
+                "ball_view(mode='coord', center=..., size=480)，球可能已出窗；一个都没有就先 "
                 "ball_overview / ball_scan 找人、找轨迹。"
             ),
         }
@@ -626,8 +659,8 @@ class AgentSession:
         pts.sort()
         return pts
 
-    def plan(self, packet_id: str) -> dict:
-        """每帧状态 + 下一步该覆盖哪几段。agent 不用自己记进度。"""
+    def plan(self, packet_id: str, detail: bool = False) -> dict:
+        """进度计数 + 下一步该看哪几帧。agent 不用自己记进度。`detail=True` 才给逐帧表。"""
         from client import field as F
         from client import sample as S
 
@@ -661,8 +694,9 @@ class AgentSession:
                 "query": int(fi) in set(want),
                 "n_cands": len(cands.get(key) or []),
             })
-        empty = [f["frame_idx"] for f in frames_state if f["state"] == "empty"]
-        return {
+        empty = [f["frame_idx"] for f in frames_state if f["state"] in ("empty", "nominated")]
+        absent = [f["frame_idx"] for f in frames_state if f["state"] == "absent"]
+        out = {
             "packet_id": packet_id,
             "roi": meta["roi"],
             "roi_size": list(prep.size),
@@ -670,17 +704,27 @@ class AgentSession:
             "n_targets": prog["n_targets"],
             "n_labeled": prog["n_labeled"],
             "n_visible": prog["n_visible"],
-            "n_nominated": sum(1 for f in frames_state if f["state"] == "nominated"),
+            "n_absent": len(absent),
+            "n_empty": len(empty),
             "field_air_margin": getattr(geom, "air_margin", None),
             "query_frames": want,
-            "empty_frames": empty[:40],
-            "frames": frames_state,
+            # 全量给出：精简输出也不能让 agent 漏掉目标帧
+            "empty_frames": empty,
+            "absent_frames": absent,
             "next": (
-                "cold: ball_overview 看人，再 ball_scan 描轨迹"
+                "cold: ball_overview 看人、ball_scan 读轨迹，确认比赛球后 ball_view(mode='coord') 定位"
                 if len(anchors) < 2
-                else f"对 query_frames（{len(want)} 帧）ball_strip + ball_nominate，然后 ball_fit"
+                else (
+                    f"从 empty_frames 起 ball_view(mode='coord', frame_idx={empty[0]}) 连续看，"
+                    "ball_label(image_xy 或 roi_xy) 写坐标"
+                    if empty else
+                    "目标帧都标了：ball_review 逐页复核，改完后 ball_submit(visual_reviewed=true, review_id=...)"
+                )
             ),
         }
+        if detail:
+            out["frames"] = frames_state
+        return out
 
     def render_overview(self, packet_id: str, frame_idx: Any = None) -> dict:
         """全景三段 1:1 raw，粗格子。看人，不定点。"""
@@ -779,8 +823,8 @@ class AgentSession:
             "cell_h_px": round(view.cell_h, 1),
             "image_paths": [str(path)],
             "hint": (
-                "同一窗连续多帧，共用格子。先看人的动作再提名 0–3 个格子。"
-                "球可以是静止的。用 ball_nominate 写入，可多个可空。"
+                "同一窗连续多帧，共用格子，只用来看人的动作和大致区域。球可以是静止的。"
+                "定位用 ball_view(mode='coord') 的 1:1 页面，再 ball_label(image_xy 或 roi_xy)。"
             ),
         }
 
@@ -838,7 +882,7 @@ class AgentSession:
             "frame_idx": fi,
             "candidates": out,
             "n": len(store[str(fi)]),
-            "hint": "verify.score 低的点不要当答案。下一帧继续 strip，或 ball_fit 看整条轨迹。",
+            "hint": "【旧路线】verify 只是启发式诊断。默认路线是 coord 视图 + ball_label 直接写坐标。",
         }
 
     def fit(self, packet_id: str) -> dict:
@@ -885,7 +929,7 @@ class AgentSession:
                 }
                 for p in pts
             ],
-            "hint": "残差大 / missing 的段用 ball_strip 补提名。过得去就 ball_follow 复核再 ball_commit。",
+            "hint": "【旧路线】拟合只帮助找球，插值点不是答案。默认路线是 coord 视图 + ball_label + ball_review。",
         }
 
     def follow(self, packet_id: str, track: Any = None) -> dict:
@@ -913,7 +957,7 @@ class AgentSession:
             "n": len(pts),
             "image_paths": [str(path)],
             "selectable": False,
-            "hint": "十字应钉在球上并跟着人的动作走。整段不对就 ball_nominate 重来，不要 commit。",
+            "hint": "【旧路线】十字应钉在球上。默认路线下用 ball_review 看实际保存的标签。",
         }
 
     def commit(self, packet_id: str, frames: Any = None, track: Any = None) -> dict:
@@ -1054,6 +1098,8 @@ class AgentSession:
                 frame_idx=int(d.get("frame_idx") or -1), mode=str(d.get("mode") or "crop"),
                 view=_view_from_geom(d["geom"]),
                 paths=[Path(x) for x in (d.get("paths") or [])],
+                tiles=list(d.get("tiles") or []),
+                page_size=tuple(d["page_size"]) if d.get("page_size") else None,
             )
             with self._view_lock:
                 self._views[view_id] = ref
@@ -1142,7 +1188,7 @@ class AgentSession:
             "rows": rows,
             "note": (
                 "时间彩色：早=蓝、晚=红，白线是球轨迹。先读走向再 ball_frames 挑 2 个锚点帧，"
-                "进 crop 480→80→45。格子只帮你描述位置，不能 ball_label。"
+                "进 ball_view(mode='coord') 看 1:1 原图。格子只帮你描述位置，不能 ball_label。"
             ),
         }
 
@@ -1156,8 +1202,13 @@ class AgentSession:
         cols: Optional[int] = None,
         rows: Optional[int] = None,
         pane: Optional[str] = None,
+        frames: Any = None,
+        scale: Any = None,
     ) -> dict:
         """出一张（或三张）带网格的图，写到 `{work}/{pid}/views/`。
+
+        `mode="coord"`：连续多帧、同一窗、1:1（或 2× 最近邻）原图，无格子，按页面预算分页。
+        直接报页面像素（`image_xy`）或 ROI 像素标注。
 
         `mode="global"`：ROI 横切三段、每段 1:1 不缩小、raw+enh 竖叠，三段共用一套
         连续字母。整幅拼版找球实测 0%，所以全局只用来定个大概，别指望在这一级点准。
@@ -1185,6 +1236,8 @@ class AgentSession:
 
         if mode == "global":
             return self._render_global(prep, packet_id, frame_idx, cols, rows)
+        if mode == "coord":
+            return self._render_coord(prep, packet_id, sess, meta, frame_idx, frames, center, size, scale)
         panes = PANES_CROP
         if pane is not None:
             key = str(pane).lower()
@@ -1212,6 +1265,9 @@ class AgentSession:
             "paths": [str(p) for p in ref.paths],
             "geom": _geom_of(ref.view),
         }
+        if ref.tiles:
+            payload["tiles"] = ref.tiles
+            payload["page_size"] = list(ref.page_size or (0, 0))
         (self._views_dir(ref.packet_id) / f"{ref.view_id}.json").write_text(
             json.dumps(payload, ensure_ascii=False), encoding="utf-8"
         )
@@ -1285,6 +1341,86 @@ class AgentSession:
                 "飞行的球在滤波图里是孤立小白斑，球员是大块白人形。每格约 "
                 f"{round(master.cell_w)}×{round(master.cell_h)} px，只能定个大概，"
                 "拿到格子号后立刻用 mode='crop' 往下钻，别在这一级 ball_label。"
+            ),
+        }
+
+    def _register_pages(self, pid: str, mode: str, pages: Sequence[RV.Page], key: Sequence[Any],
+                        center: Optional[Tuple[float, float]] = None, size: float = 0.0,
+                        center_source: str = "") -> List[dict]:
+        out = []
+        for pg in pages:
+            fs = [t.frame_idx for t in pg.tiles]
+            vid = self._view_id(mode, fs[0], [mode, fs, list(key)])
+            path = self._write_png(pid, vid, 0, pg.image)
+            w, h = pg.size
+            stub = V.GridView(image=np.zeros((1, 1, 3), np.uint8), cols=1, rows=1, origin=(0.0, 0.0),
+                              cell_w=1.0, cell_h=1.0, kind=mode, frame_idx=fs[0])
+            self._register(ViewRef(
+                view_id=vid, packet_id=pid, frame_idx=fs[0], mode=mode, view=stub, paths=[path],
+                center=center, size=size, center_source=center_source,
+                tiles=[t.to_dict() for t in pg.tiles], page_size=(w, h),
+            ))
+            out.append({
+                "view_id": vid,
+                "path": str(path),
+                "page_px": [w, h],
+                "frames": fs,
+                "tiles": [[t.frame_idx, t.roi_origin[0], t.roi_origin[1], t.status or None]
+                          for t in pg.tiles],
+            })
+        return out
+
+    def _render_coord(self, prep, pid: str, sess: dict, meta: dict, frame_idx: int,
+                      frames: Any, center: Any, size: Any, scale: Any) -> dict:
+        try:
+            win = int(round(float(size if size is not None else DEFAULT_COORD_SIZE)))
+            sc = int(scale) if scale else DEFAULT_COORD_SCALE
+        except (TypeError, ValueError):
+            return {"error": "size / scale 非法"}
+        if not scale and RV.check_geometry(win, sc, self.page_px):
+            sc = 1
+        err = RV.check_geometry(win, sc, self.page_px)
+        if err:
+            return {"error": err}
+        if frames:
+            try:
+                fs = [int(x) for x in frames]
+            except (TypeError, ValueError):
+                return {"error": f"frames 应为整数列表，收到 {frames!r}"}
+        else:
+            fs = [int(frame_idx)]
+        bad = [f for f in fs if not prep.has(f)]
+        if bad:
+            return {"error": f"没有这些帧: {bad[:10]}；帧号看 ball_frames 的 targets"}
+        ctr, src = self._resolve_center(prep, pid, sess, meta, fs[0], center)
+        if ctr is None:
+            return {"error": "算不出中心，请给 center=[x,y]"}
+        specs = [RV.TileSpec(frame_idx=f, center=ctr) for f in fs]
+        pages = RV.render_pages(prep, specs, win, sc, self.page_px)
+        out = self._register_pages(pid, "coord", pages, [round(ctr[0], 1), round(ctr[1], 1), win, sc],
+                                   center=ctr, size=float(win), center_source=src)
+        return {
+            "view_id": out[0]["view_id"],
+            "packet_id": pid,
+            "mode": "coord",
+            "frames": fs,
+            "center": [round(ctr[0], 1), round(ctr[1], 1)],
+            "center_source": src,
+            "size": win,
+            "scale": sc,
+            "caption_px": RV.CAPTION,
+            "pages": out,
+            "image_paths": [p["path"] for p in out],
+            "xy_unit": self.xy_unit,
+            "hint": (
+                f"每格 = 某帧 ROI 的 {win}px 原图（{sc}×），上方 {RV.CAPTION}px 标题写着帧号和 ROI0。"
+                + (f"标注：ball_label(frame_idx, view_id=该页 view_id, image_xy=[x, y]) —— image_xy 是相对"
+                   "整张页面的 0–1000 归一化坐标（左上 0,0，右下 1000,1000），工具换算。"
+                   if self.xy_unit == "n1000" else
+                   "标注：ball_label(frame_idx, view_id=该页 view_id, image_xy=[页面像素]) 由工具换算；"
+                   f"或自己算 roi_xy = ROI0 + (tile 内像素)/{sc}。看图尺寸若不是 page_px，同时给 seen_size。")
+                + "默认一页一帧（单帧放大读点最准）；frames=[...] 可一页多帧做对照，但读点更容易错。"
+                "先看人的动作再找球，球可以静止；看不见就 ball_absent，不猜。"
             ),
         }
 
@@ -1404,9 +1540,9 @@ class AgentSession:
             "hint": (
                 f"左右两个 pane 是同一块 {round(win)}px 窗的原图和滤波图，共用一套 "
                 f"{view.cols}×{view.rows} 格子（列 {view.letters()}，行 1–{view.rows}），"
-                f"每格 {round(view.cell_w, 1)} px。看得见球就回一个格子号（如 C3）："
-                "窗还大就用这个格心当 center 再收一级（480→80→45），"
-                "到 45px 那级再 ball_label。看不见就别猜——猜错比空缺更有害。"
+                f"每格 {round(view.cell_w, 1)} px，格子只辅助找区域。最终位置用 "
+                "ball_view(mode='coord', center=格心) 的 1:1 页面报 image_xy / roi_xy 球心；"
+                "不要把 80/45 小窗当主视野。看不见就别猜——猜错比空缺更有害。"
                 + ("（注意：窗超出 ROI，黑边部分不是画面）" if clipped else "")
             ),
         }
@@ -1430,17 +1566,29 @@ class AgentSession:
                 mode=str(d.get("mode") or "crop"),
                 view=_view_from_geom(d["geom"]),
                 paths=[Path(x) for x in (d.get("paths") or [])],
+                tiles=list(d.get("tiles") or []),
+                page_size=tuple(d["page_size"]) if d.get("page_size") else None,
             )
             with self._view_lock:
                 self._views[view_id] = ref
             return ref
         return None
 
-    def resolve_point(self, view_id: str, cell: str) -> dict:
-        """格子号 → ROI 像素 → 全景像素。agent 的答案落地只走这一个入口。"""
+    def resolve_point(self, view_id: str, cell: Optional[str] = None,
+                      image_xy: Any = None, seen_size: Any = None, xy_unit: Optional[str] = None) -> dict:
+        """格子号或页面像素 → ROI 像素 → 全景像素。agent 的答案落地只走这一个入口。
+
+        `cell` 只对带格子的图有效；`image_xy` 只对无格子的 1:1 页面（coord / review）有效，
+        默认以生成图片的原始像素计（查看器缩放过就同时给 `seen_size`）；`xy_unit="n1000"` 时
+        是相对整张页面的 0–1000 归一化坐标。
+        """
         ref = self.get_view(view_id)
         if ref is None:
             return {"error": f"不认识 view_id={view_id!r}，先调 ball_view"}
+        if image_xy is not None:
+            return self._resolve_image_xy(ref, image_xy, seen_size, xy_unit)
+        if ref.mode in NO_GRID_MODES:
+            return {"error": f"{view_id} 是 {ref.mode} 图，没有格子；在这张图上用 image_xy 或 roi_xy"}
         xy = ref.view.cell_center(str(cell))
         if xy is None:
             return {
@@ -1466,6 +1614,46 @@ class AgentSession:
             "roi_xy": [round(xy[0], 2), round(xy[1], 2)],
             "pano_xy": [round(px, 2), round(py, 2)],
             "cell_px": [round(ref.view.cell_w, 2), round(ref.view.cell_h, 2)],
+        }
+
+    def _resolve_image_xy(self, ref: ViewRef, image_xy: Any, seen_size: Any,
+                          xy_unit: Optional[str] = None) -> dict:
+        if not ref.tiles or not ref.page_size:
+            return {"error": f"{ref.view_id} 是 {ref.mode} 图，不支持 image_xy；"
+                             "image_xy 只用于 ball_view(mode='coord') 或 ball_review 的叠加页"}
+        xy = _xy(image_xy)
+        if xy is None:
+            return {"error": f"image_xy 应为 [x, y]，收到 {image_xy!r}"}
+        unit = xy_unit or self.xy_unit
+        if unit not in XY_UNITS:
+            return {"error": f"xy_unit 只能是 {' / '.join(XY_UNITS)}，收到 {unit!r}"}
+        pw, ph = int(ref.page_size[0]), int(ref.page_size[1])
+        if unit == "n1000":
+            if seen_size is not None:
+                return {"error": "xy_unit=n1000 与缩放无关，不要再给 seen_size"}
+            if not (0 <= xy[0] <= 1000 and 0 <= xy[1] <= 1000):
+                return {"error": f"xy_unit=n1000 时 image_xy 应在 0–1000，收到 {list(xy)}；"
+                                 f"若报的是页面像素（页面 {pw}×{ph}）就传 xy_unit='px'"}
+            xy = (min(xy[0] * pw / 1000.0, pw - 0.01), min(xy[1] * ph / 1000.0, ph - 0.01))
+        tiles = [RV.Tile.from_dict(t) for t in ref.tiles]
+        got = RV.page_to_roi(tiles, (pw, ph), xy, None if seen_size is None else _xy(seen_size))
+        if got.get("error"):
+            return {"error": f"{got['error']}（view {ref.view_id}）"}
+        if not is_ready(self.work_root, ref.packet_id):
+            return {"error": f"{ref.packet_id} 还没准备好，算不了全景坐标"}
+        prep = self.prep(ref.packet_id)
+        rx, ry = got["roi_xy"]  # type: ignore[misc]
+        roi_w, roi_h = prep.size
+        if not (0 <= rx < roi_w and 0 <= ry < roi_h):
+            return {"error": f"点落在 ROI 外的补黑区（ROI {round(rx, 1)},{round(ry, 1)}，"
+                             f"ROI 尺寸 {roi_w}×{roi_h}），不是画面"}
+        px, py = prep.to_pano(rx, ry)
+        return {
+            "view_id": ref.view_id,
+            "packet_id": ref.packet_id,
+            "frame_idx": int(got["frame_idx"]),  # type: ignore[arg-type]
+            "roi_xy": [round(rx, 2), round(ry, 2)],
+            "pano_xy": [round(px, 2), round(py, 2)],
         }
 
     def view_image(self, view_id: str, index: int = 0) -> dict:
@@ -1529,8 +1717,11 @@ class AgentSession:
         occluded: bool = False,
         blurred: bool = False,
         clear: bool = False,
+        image_xy: Any = None,
+        seen_size: Any = None,
+        xy_unit: Optional[str] = None,
     ) -> dict:
-        """写一帧标注到 labels.json。坐标三种给法，优先级 cell > roi_xy > pano_xy。"""
+        """写一帧标注到 labels.json。坐标给法优先级 cell > image_xy > roi_xy > pano_xy。"""
         try:
             fi = int(frame_idx)
         except (TypeError, ValueError):
@@ -1559,6 +1750,22 @@ class AgentSession:
                              "别把上一帧的格子号写到这一帧"
                 }
             cell_name = got["cell"]
+            roi_pt = (got["roi_xy"][0], got["roi_xy"][1])
+            pano_pt = (got["pano_xy"][0], got["pano_xy"][1])
+        elif image_xy is not None:
+            if not view_id:
+                return {"error": "给了 image_xy 就必须给 view_id（页面像素只在那一页里有意义）"}
+            ref = self.get_view(str(view_id))
+            if ref is not None and ref.packet_id != packet_id:
+                return {"error": f"view_id 属于包 {ref.packet_id}，不是 {packet_id}"}
+            got = self.resolve_point(str(view_id), image_xy=image_xy, seen_size=seen_size, xy_unit=xy_unit)
+            if got.get("error"):
+                return got
+            if int(got["frame_idx"]) != fi:
+                return {
+                    "error": f"image_xy 落在帧 {got['frame_idx']} 的格子里，但要标的是帧 {fi}；"
+                             "看清 tile 标题里的帧号"
+                }
             roi_pt = (got["roi_xy"][0], got["roi_xy"][1])
             pano_pt = (got["pano_xy"][0], got["pano_xy"][1])
         elif _xy(roi_xy) is not None:
@@ -1621,9 +1828,154 @@ class AgentSession:
             ),
         }
 
+    # ------------------------------------------------------------ 标后复核
+
+    @staticmethod
+    def _labels_hash(labels: Dict[str, dict], targets: Sequence[int]) -> str:
+        rows = []
+        for t in targets:
+            r = labels.get(str(int(t)))
+            rows.append(None if r is None else [
+                bool(r.get("visible")), r.get("pano_x"), r.get("pano_y"),
+                bool(r.get("occluded")), bool(r.get("blurred")),
+            ])
+        blob = json.dumps([list(map(int, targets)), rows], sort_keys=True)
+        return hashlib.sha1(blob.encode()).hexdigest()
+
+    def _reviews_path(self, pid: str) -> Path:
+        return workspace(self.work_root, pid) / "reviews.json"
+
+    def review(self, packet_id: str, frames: Any = None, size: Any = None, scale: Any = None,
+               absent_size: Any = None) -> dict:
+        """从实际保存的 labels 出复核材料。默认覆盖全部目标帧，不按分数筛。
+
+        - 叠加页：每帧一个 tile，visible 画圈、absent / unlabeled 写在标题条上
+        - absent 专项：每段连续 absent 连同前后目标帧，用更大的窗再看一遍；
+          窗心是前后可见点插值，**不是全帧搜索**
+        - 轨迹：每 24 个目标帧一段，缺帧 / 不可见处断开
+        """
+        if not is_ready(self.work_root, packet_id):
+            job = self.job_state(packet_id)
+            return {"error": f"{packet_id} 还没准备好（{job['state']}: {job['msg']}）"}
+        try:
+            win = int(round(float(size if size is not None else DEFAULT_REVIEW_SIZE)))
+            sc = int(scale or 1)
+            awin = int(round(float(absent_size if absent_size is not None else DEFAULT_ABSENT_SIZE)))
+        except (TypeError, ValueError):
+            return {"error": "size / scale / absent_size 非法"}
+        for s, k in ((win, sc), (awin, 1)):
+            err = RV.check_geometry(s, k, self.page_px)
+            if err:
+                return {"error": err}
+        prep = self.prep(packet_id)
+        sess = self.load_session(packet_id)
+        meta = self._meta_dict(packet_id, sess)
+        prog = self._progress(packet_id, sess, meta)
+        targets = [int(t) for t in prog["targets"]]
+        labels = prog["labels"]
+        fs = [int(x) for x in frames] if frames else targets
+        bad = [f for f in fs if not prep.has(f)]
+        if bad:
+            return {"error": f"没有这些帧: {bad[:10]}"}
+        step = int(meta.get("step") or 1)
+
+        roi_of: Dict[int, Optional[Tuple[float, float]]] = {}
+        status: Dict[int, str] = {}
+        for fi in targets:
+            r = labels.get(str(fi))
+            if r and r.get("visible") and r.get("pano_x") is not None:
+                roi_of[fi] = prep.to_roi(float(r["pano_x"]), float(r["pano_y"]))
+                status[fi] = "visible"
+            else:
+                roi_of[fi] = None
+                status[fi] = "absent" if r else "unlabeled"
+        visible_pts = sorted((fi, xy[0], xy[1]) for fi, xy in roi_of.items() if xy is not None)
+        w, h = prep.size
+        roi_center = (w / 2.0, h / 2.0)
+
+        def spec(fi: int, note: str = "") -> RV.TileSpec:
+            st = status.get(fi) or "unlabeled"
+            xy = roi_of.get(fi)
+            ctr = xy or RV.interp_center(fi, visible_pts) or roi_center
+            return RV.TileSpec(frame_idx=fi, center=ctr, status=st, mark_xy=xy,
+                               note=note if st != "visible" else "")
+
+        overlay = self._register_pages(
+            packet_id, "review",
+            RV.render_pages(prep, [spec(f) for f in fs], win, sc, self.page_px), [win, sc, "ov"])
+
+        absent = [f for f in fs if status.get(f) == "absent"]
+        absent_pages: List[dict] = []
+        idx = {t: i for i, t in enumerate(targets)}
+        runs: List[List[int]] = []
+        for f in absent:
+            if runs and idx.get(f, -9) - idx.get(runs[-1][-1], -9) == 1:
+                runs[-1].append(f)
+            else:
+                runs.append([f])
+        for run in runs:
+            i0, i1 = idx.get(run[0]), idx.get(run[-1])
+            ctx = ([targets[i0 - 1]] if i0 else []) + run + (
+                [targets[i1 + 1]] if i1 is not None and i1 + 1 < len(targets) else [])
+            specs = [spec(f, note="NOT full-frame search") for f in ctx if prep.has(f)]
+            absent_pages += self._register_pages(
+                packet_id, "review_absent", RV.render_pages(prep, specs, awin, 1, self.page_px),
+                [awin, "abs"])
+
+        traj: List[dict] = []
+        for seg in RV.trajectory_segments(fs):
+            got = RV.render_trajectory(prep, seg, roi_of, step, max_side=max(self.page_px))
+            if got is None:
+                continue
+            img, info = got
+            vid = self._view_id("trajectory", seg[0], ["traj", seg, step])
+            path = self._write_png(packet_id, vid, 0, img)
+            self._register(ViewRef(view_id=vid, packet_id=packet_id, frame_idx=seg[0], mode="trajectory",
+                                   view=V.GridView(image=np.zeros((1, 1, 3), np.uint8), cols=1, rows=1,
+                                                   origin=(0.0, 0.0), cell_w=1.0, cell_h=1.0,
+                                                   kind="trajectory", frame_idx=seg[0]),
+                                   paths=[path]))
+            traj.append({"view_id": vid, "path": str(path), **info})
+
+        labels_hash = self._labels_hash(labels, targets)
+        review_id = f"r{labels_hash[:12]}"
+        full = set(fs) >= set(targets)
+        doc = self._read_json(self._reviews_path(packet_id))
+        doc[review_id] = {
+            "labels_hash": labels_hash, "created_at": time.time(), "full_coverage": full,
+            "n_frames": len(fs), "n_pages": len(overlay) + len(absent_pages) + len(traj),
+        }
+        self._reviews_path(packet_id).write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+        missing = [t for t in fs if status.get(t) == "unlabeled"]
+        all_pages = overlay + absent_pages + traj
+        return {
+            "packet_id": packet_id,
+            "review_id": review_id,
+            "labels_hash": labels_hash,
+            "full_coverage": full,
+            "n_frames": len(fs),
+            "n_visible": sum(1 for f in fs if status.get(f) == "visible"),
+            "n_absent": len(absent),
+            "missing_frames": missing,
+            "absent_frames": absent,
+            "pages": overlay,
+            "absent_pages": absent_pages,
+            "trajectory": traj,
+            "image_paths": [p["path"] for p in all_pages],
+            "hint": (
+                f"共 {len(overlay)} 页叠加 + {len(absent_pages)} 页 absent 专项 + {len(traj)} 段轨迹，"
+                "逐页看（ball_view_image 按 view_id 取）。查圈是否落在比赛球上（不是球鞋/白线/备用球），"
+                "absent 页窗心只是插值，不是全帧搜索——球可能已飞出窗，必要时 ball_overview 或换 center "
+                "用 ball_view(mode='coord') 再找。叠加页上可直接 ball_label(view_id, image_xy) 改标；"
+                f"改标后旧 review_id 失效，重跑 ball_review，再 ball_submit(visual_reviewed=true, review_id=...)。"
+                + (f" 还有 {len(missing)} 帧未标。" if missing else "")
+            ),
+        }
+
     # ------------------------------------------------------------ 收口
 
-    def submit(self, packet_id: str, force: bool = False, visual_reviewed: bool = False) -> dict:
+    def submit(self, packet_id: str, force: bool = False, visual_reviewed: bool = False,
+               review_id: Optional[str] = None) -> dict:
         """`build_result` + `submit(source="ai")` 进审核队列。
 
         agent 通道不再免审入库。默认保留 verify 门；完成标后视觉复核可用
@@ -1637,11 +1989,16 @@ class AgentSession:
         if not is_ready(self.work_root, packet_id):
             job = self.job_state(packet_id)
             return {"error": f"{packet_id} 还没准备好（{job['state']}: {job['msg']}）"}
+        if visual_reviewed and force:
+            return {"error": "visual_reviewed 路径不接受 force：缺帧就补标，确实标不了就 ball_release"}
         prep = self.prep(packet_id)
         meta = self._meta_dict(packet_id, sess)
         prog = self._progress(packet_id, sess, meta)
         labels = prog["labels"]
         missing = prog["missing"]
+        warnings: List[str] = []
+        if visual_reviewed:
+            warnings = self._review_warnings(packet_id, labels, prog["targets"], review_id)
         if missing and not force:
             return {
                 "error": f"还有 {len(missing)} 个目标帧没标，拒绝提交（真要交残包传 force=true）",
@@ -1690,21 +2047,64 @@ class AgentSession:
         sess["done"] = True
         sess["submitted_at"] = time.time()
         self.save_session(packet_id, sess)
+        targets = prog["targets"]
+        n_absent = sum(1 for t in targets if str(t) in labels and not labels[str(t)].get("visible"))
+        receipt = {
+            "packet_id": packet_id,
+            "submission_id": (resp or {}).get("submission_id"),
+            "method_tag": (resp or {}).get("method_tag"),
+            "submitted_at": sess["submitted_at"],
+            "elapsed_sec": elapsed,
+            "n_targets": len(targets),
+            "n_labeled": prog["n_labeled"],
+            "n_visible": prog["n_visible"],
+            "n_absent": n_absent,
+            "n_missing": len(missing),
+            "review_mode": result["review_mode"],
+            "review_id": review_id,
+            "labels_hash": self._labels_hash(labels, targets),
+            "review_warnings": warnings,
+            "review_state": "pending",
+        }
+        receipt_path = workspace(self.work_root, packet_id) / "receipt.json"
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2), encoding="utf-8")
         return {
             "ok": True,
             "packet_id": packet_id,
             "n_labeled": len(labels),
             "n_visible": prog["n_visible"],
+            "n_absent": n_absent,
             "n_missing": len(missing),
             "forced": bool(missing and force),
             "elapsed_sec": elapsed,
             "submission_id": (resp or {}).get("submission_id"),
             "has_bundle": False,
             "method_tag": (resp or {}).get("method_tag"),
-            "message": f"已提交（{len(labels)} 帧，source=ai 进审核，不再免审入库）",
+            "message": (
+                f"已提交（{prog['n_labeled']}/{len(targets)} 帧，可见 {prog['n_visible']}、"
+                f"不可见 {n_absent}；source=ai 进审核，待审核不等于已入库）"
+            ),
             "source": "ai",
             "review_mode": result["review_mode"],
+            "review_warnings": warnings,
+            "receipt": str(receipt_path),
         }
+
+    def _review_warnings(self, pid: str, labels: Dict[str, dict], targets: Sequence[int],
+                         review_id: Optional[str]) -> List[str]:
+        """提示模式：只警告，不拦截。复核记录只是标注者的声明，不是免审凭证。"""
+        if not review_id:
+            return ["no_review_id: 没有给 review_id，无法确认复核看的是当前标签"]
+        rec = self._read_json(self._reviews_path(pid)).get(str(review_id))
+        if not rec:
+            return [f"unknown_review: 本地没有 {review_id} 的复核记录"]
+        out = []
+        if rec.get("labels_hash") != self._labels_hash(labels, targets):
+            out.append("review_stale: 复核之后标签又改过，受影响的页没有重新看")
+        if not rec.get("full_coverage"):
+            out.append("partial_review: 这次复核没覆盖全部目标帧")
+        return out
 
     def _gate_labels(self, prep, labels: Dict[str, dict], meta: dict) -> dict:
         from client import verify as Vv
@@ -1732,8 +2132,30 @@ class AgentSession:
             hist.append((int(r["frame_idx"]), rx, ry))
         return {"n_fail": len(failed), "failed": failed}
 
-    def release(self, packet_id: str, reason: str = "released") -> dict:
+    @staticmethod
+    def release_reason(reason: str = "", reason_code: str = "", note: str = "") -> Tuple[Optional[str], str]:
+        """结构化原因 → 服务端认的字符串。返回 (错误, reason)。
+
+        困难包记 `hard:<code>`（同一方法冷却），下载 / 解码失败记 `error:<code>`（短冷却）。
+        只给旧的自由文本 reason 时原样上报，服务端按关键词兜底归类。
+        """
+        code = str(reason_code or "").strip()
+        reason = "" if reason == "released" else str(reason or "")
+        note = str(note or reason).strip()
+        if not code:
+            return None, note or "released"
+        if code not in RELEASE_CODES:
+            return f"reason_code 只能是 {' / '.join(RELEASE_CODES)}，收到 {code!r}", ""
+        prefix = RELEASE_CODES[code]
+        head = f"{prefix}:{code}" if prefix else code
+        return None, f"{head}: {note}"[:300] if note and note != code else head
+
+    def release(self, packet_id: str, reason: str = "released", reason_code: str = "",
+                note: str = "") -> dict:
         """放弃这一包换下一个。labels.json 留着，下次领到同一包能接着用。"""
+        err, reason = self.release_reason(reason, reason_code, note)
+        if err:
+            return {"error": err}
         sess = self.load_session(packet_id)
         if not sess:
             return {"error": f"没有 {packet_id} 的会话"}

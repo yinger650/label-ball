@@ -41,7 +41,7 @@ from client.run import DEFAULT_WORK  # noqa: E402
 log = logging.getLogger("client.mcp_server")
 
 SERVER_NAME = "ball-gt"
-SERVER_VERSION = "1.2.0"
+SERVER_VERSION = "1.4.0"
 METHOD_KEYS = ("harness", "harness_version", "model", "model_version")
 # 客户端报的版本在这个集合里就照它回，否则回我们开发时对的那一版
 KNOWN_PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")
@@ -57,7 +57,12 @@ ERR_INTERNAL = -32603
 # ---------------------------------------------------------------- 工具定义
 
 
-def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
+def _unit_text(xy_unit: str) -> str:
+    return ("image_xy 用 0–1000 归一化坐标（相对整张页面，左上 0,0，右下 1000,1000），不要报像素"
+            if xy_unit == "n1000" else "image_xy 用页面像素（以生成图的原始像素计）")
+
+
+def _tools(sess_get: Callable[[], AgentSession], xy_unit: str = "px") -> List[dict]:
     """工具表。`handler` 返回 dict；带 `error` 键就当工具失败。"""
 
     def t_lease(args: dict) -> dict:
@@ -74,7 +79,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         return sess_get().frames(str(args.get("packet_id") or ""))
 
     def t_plan(args: dict) -> dict:
-        return sess_get().plan(str(args.get("packet_id") or ""))
+        return sess_get().plan(str(args.get("packet_id") or ""), detail=bool(args.get("detail")))
 
     def t_scan(args: dict) -> dict:
         return sess_get().render_scan(
@@ -154,6 +159,17 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             cols=args.get("cols"),
             rows=args.get("rows"),
             pane=args.get("pane"),
+            frames=args.get("frames"),
+            scale=args.get("scale"),
+        )
+
+    def t_review(args: dict) -> dict:
+        return sess_get().review(
+            packet_id=str(args.get("packet_id") or ""),
+            frames=args.get("frames"),
+            size=args.get("size"),
+            scale=args.get("scale"),
+            absent_size=args.get("absent_size"),
         )
 
     def t_view_image(args: dict) -> dict:
@@ -171,18 +187,24 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             occluded=bool(args.get("occluded")),
             blurred=bool(args.get("blurred")),
             clear=bool(args.get("clear")),
+            image_xy=args.get("image_xy"),
+            seen_size=args.get("seen_size"),
+            xy_unit=args.get("xy_unit"),
         )
 
     def t_submit(args: dict) -> dict:
         return sess_get().submit(
             str(args.get("packet_id") or ""), bool(args.get("force")),
             visual_reviewed=bool(args.get("visual_reviewed")),
+            review_id=args.get("review_id") or None,
         )
 
     def t_release(args: dict) -> dict:
         return sess_get().release(
             str(args.get("packet_id") or ""),
-            str(args.get("reason") or "released"),
+            str(args.get("reason") or ""),
+            reason_code=str(args.get("reason_code") or ""),
+            note=str(args.get("note") or ""),
         )
 
     num = {"type": "number"}
@@ -199,13 +221,15 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
                 "领一个待标注的足球 GT 包（或接上自己没做完的那个），并在后台开始"
                 "下载解码 + 租约心跳。返回 packet_id、目标帧数、ROI。"
                 "下载解码约 1–3 分钟，之后用 ball_status 轮询到 ready。"
-                "必须说明标注方法（harness + 模型，带版本）：启动参数没配时在这里传。"
+                "必须说明标注方法（harness + 模型，带版本）：启动参数没配时在这里传；"
+                "启动参数已配的项以启动参数为准，这里传了也不覆盖，不要填 unknown。"
                 "被同一方法重标过的包不会再发给你。"
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "worker": {"type": "string", "description": "标注员名字，默认用启动时的 --worker"},
+                    "worker": {"type": "string",
+                               "description": "标注员名字；启动时给了 --worker 就忽略这里，一般不要传"},
                     "kind": {
                         "type": "string",
                         "enum": ["human", "repair"],
@@ -249,13 +273,16 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         {
             "name": "ball_plan",
             "description": (
-                "一包的进度板：每帧 empty/nominated/labeled/absent、该问的 query_frames、"
-                "球场边界、下一步建议。agent 不用自己记进度。冷启动先 overview+scan，"
-                "之后按 query_frames 做 strip+nominate，再 fit。"
+                "一包的进度板：计数、全部未标帧 empty_frames、absent_frames、下一步建议。"
+                "agent 不用自己记进度。冷启动先 overview+scan，之后 ball_view(mode='coord') "
+                "连续看并 ball_label 写坐标，标满后 ball_review。detail=true 才给逐帧表。"
             ),
             "inputSchema": {
                 "type": "object",
-                "properties": {"packet_id": {"type": "string"}},
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "detail": {"type": "boolean", "default": False, "description": "附逐帧状态表"},
+                },
                 "required": ["packet_id"],
             },
             "handler": t_plan,
@@ -265,7 +292,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             "description": (
                 "看整包 Scan 图（产包端生成）。kind=time 是时间彩色编码（早蓝晚红），"
                 "一眼看出轨迹方向和该跳到哪一段；kind=dog 是灰度时间最大投影。"
-                "冷启动先看这张找轨迹带。格子只用来描述位置，不能 ball_label。"
+                "冷启动先看这张找轨迹带，只辅助搜索。格子只用来描述位置，不能 ball_label。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -298,7 +325,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             "name": "ball_strip",
             "description": (
                 "同一窗连续多帧横排（默认 240 px ≈ 1 个人，6×6），原图+滤波图，共用格子。"
-                "先看人的动作再提名。球可以是静止的。主力视图，不要再用 80/45 小窗当主视野。"
+                "看人的动作、找大致区域用；定位请用 ball_view(mode='coord')。球可以是静止的。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -323,7 +350,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         {
             "name": "ball_nominate",
             "description": (
-                "对一帧提名 0–3 个候选格子。返回每个点的本地 verify（zone/dog/rgb/kine）。"
+                "【旧路线，兼容保留】对一帧提名 0–3 个候选格子。返回每个点的本地 verify（zone/dog/rgb/kine）。"
                 "可多可空。score 低的点不要当答案。"
             ),
             "inputSchema": {
@@ -351,7 +378,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         {
             "name": "ball_fit",
             "description": (
-                "本地轨迹拟合，零模型调用。返回每帧坐标、残差、缺帧。可反复跑。"
+                "【旧路线，兼容保留】本地轨迹拟合，零模型调用。返回每帧坐标、残差、缺帧。可反复跑。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -362,7 +389,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         },
         {
             "name": "ball_follow",
-            "description": "把拟合轨迹画成 follow 条带，十字应钉在球上。不对就重 nominate，不要 commit。",
+            "description": "【旧路线，兼容保留】把拟合轨迹画成 follow 条带，十字应钉在球上。不对就重 nominate，不要 commit。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -376,7 +403,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         {
             "name": "ball_commit",
             "description": (
-                "把拟合轨迹写入 labels。插值点和没过 verify 门（score<0.6 或出场）的帧拒绝并说明原因。"
+                "【旧路线，兼容保留】把拟合轨迹写入 labels。插值点和没过 verify 门（score<0.6 或出场）的帧拒绝并说明原因。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -391,7 +418,10 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         },
         {
             "name": "ball_absent",
-            "description": "把若干帧标成看不见球（visible=false）。猜错比空缺更有害。",
+            "description": (
+                "把若干帧标成看不见比赛球（visible=false）。先排除出窗、背景混淆和搜索范围不足；"
+                "没看过的帧留空，不要标 absent。猜错比空缺更有害。"
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -406,7 +436,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             "name": "ball_video",
             "description": (
                 "按目标帧重编 N fps 视频（默认 1 fps），第 t 秒 = 第 t 个目标帧。"
-                "视频路线通了就是主力。可裁一块 (x0,y0,w,h) 保分辨率。返回本机 mp4 路径。"
+                "仅辅助检查，不代替逐帧原图复核。可裁一块 (x0,y0,w,h) 保分辨率。返回本机 mp4 路径。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -434,14 +464,20 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
                 "mode='crop'：以 center 为心裁 size 像素的方窗。主力窗用 240–480 px"
                 "（装得下人），不要用 80/45 当主视野。"
                 "mode='time_grid'：连续 9 帧 3×3，默认每格 240 px，没有格子、不能 "
-                "ball_label。球可以是静止的。"
+                "ball_label。mode='coord'（定位主力）：默认只出 frame_idx 这一帧、320 px 窗最近邻放大 2×，"
+                "无格子；frames=[...] 可一页多帧做对照（读点更容易错）。直接报 image_xy 或 roi_xy 给 "
+                f"ball_label，{_unit_text(xy_unit)}。球可以是静止的。"
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "packet_id": {"type": "string"},
                     "frame_idx": {"type": "integer", "description": "帧号，取自 ball_frames 的 targets"},
-                    "mode": {"type": "string", "enum": ["global", "crop", "time_grid"], "default": "crop"},
+                    "mode": {"type": "string", "enum": ["global", "crop", "time_grid", "coord"], "default": "crop"},
+                    "frames": {"type": "array", "items": {"type": "integer"},
+                               "description": "coord 模式要看的帧；不给就只出 frame_idx 这一帧"},
+                    "scale": {"type": "integer", "enum": [1, 2],
+                              "description": "coord 模式显示倍数，默认 2（放不下自动 1）；只放大像素，不增加信息"},
                     "center": {
                         **xy,
                         "description": "crop / time_grid 窗中心，ROI 像素 [x, y]。不给就按已标点外推，"
@@ -486,11 +522,34 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
             "handler": t_view_image,
         },
         {
+            "name": "ball_review",
+            "description": (
+                "从实际保存的 labels 出复核材料，默认覆盖全部目标帧，不按分数筛："
+                "叠加页（visible 画圈，absent/unlabeled 写在标题条）、absent 专项页（连续 absent 段连同前后帧，"
+                "更大的窗，窗心是插值，**不是全帧搜索**）、每 24 帧一段的轨迹图（缺帧断开，仅诊断）。"
+                "返回 review_id（标签快照）、missing_frames、absent_frames 和每页 view_id；"
+                "叠加页上可以直接 ball_label(view_id, image_xy) 改标，改完重跑本工具。"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "packet_id": {"type": "string"},
+                    "frames": {"type": "array", "items": {"type": "integer"}, "description": "默认全部目标帧"},
+                    "size": {"type": "integer", "default": 320, "description": "叠加页每格窗口边长 240–800"},
+                    "scale": {"type": "integer", "enum": [1, 2], "default": 1},
+                    "absent_size": {"type": "integer", "default": 600, "description": "absent 专项页窗口边长"},
+                },
+                "required": ["packet_id"],
+            },
+            "handler": t_review,
+        },
+        {
             "name": "ball_label",
             "description": (
-                "写一帧标注。坐标三种给法，优先级 cell > roi_xy > pano_xy："
-                "cell 是 ball_view 那张图上的格子号（如 'C3'，必须同时给 view_id，"
-                "且那张图必须是同一帧）；roi_xy 是 ROI 像素；pano_xy 是全景像素。"
+                "写一帧标注。坐标给法优先级 cell > image_xy > roi_xy > pano_xy："
+                f"image_xy 是 coord / review 页面上的点（同时给 view_id）。{_unit_text(xy_unit)}；"
+                "可用 xy_unit 覆盖。工具按 tile 表换回 ROI，并校验 tile 帧号、标题条、黑边；roi_xy 是 ROI 像素；"
+                "pano_xy 是全景像素；cell 是带格子图的格子号（旧路线，必须同时给 view_id）。"
                 "看不见球就传 visible=false 且不给坐标——猜错的坐标比空缺更有害。"
                 "返回换算出的 pano 坐标。clear=true 则删掉这一帧的标注。"
             ),
@@ -500,7 +559,11 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
                     "packet_id": {"type": "string"},
                     "frame_idx": {"type": "integer"},
                     "view_id": {"type": "string", "description": "给 cell 时必填"},
-                    "cell": {"type": "string", "description": "格子号，如 C3"},
+                    "cell": {"type": "string", "description": "格子号，如 C3（旧路线）"},
+                    "image_xy": {**xy, "description": "coord / review 页面上的点 [x, y]，要给 view_id"},
+                    "xy_unit": {"type": "string", "enum": ["px", "n1000"],
+                                "description": f"image_xy 的单位，默认 {xy_unit}（px=页面像素，n1000=0–1000 归一化）"},
+                    "seen_size": {**xy, "description": "px 单位下你看到的图尺寸 [w, h]；只在图被缩放过时给"},
                     "roi_xy": {**xy, "description": "ROI 像素 [x, y]"},
                     "pano_xy": {**xy, "description": "全景像素 [x, y]"},
                     "visible": {"type": "boolean", "description": "这一帧能不能看见球；给了坐标默认 true"},
@@ -515,9 +578,10 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         {
             "name": "ball_submit",
             "description": (
-                "整包提交，source=ai 进审核队列（不再免审入库）。可见点必须过本地 "
-                "verify 门；visual_reviewed=true 表示已看标注叠加图和轨迹连线，跳过分数门。"
-                "visual_reviewed 不豁免缺帧或全不可见检查。"
+                "整包提交，source=ai 进审核队列（待审核 ≠ 已入库）。默认路线："
+                "ball_review 逐页看完 → visual_reviewed=true + review_id，不按 verify 分数拦截；"
+                "缺帧、全不可见仍拒绝，visual 路径不接受 force。review_id 过期（复核后又改标）会在 "
+                "review_warnings 里提示，应重跑 ball_review。成功返回 submission_id 并在本地写回执。"
             ),
             "inputSchema": {
                 "type": "object",
@@ -526,6 +590,7 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
                     "force": {"type": "boolean", "default": False, "description": "缺帧也提交"},
                     "visual_reviewed": {"type": "boolean", "default": False,
                                         "description": "已逐帧视觉复核并检查轨迹；不按 verify 分数拦截，仍要求标满并进 AI 审核"},
+                    "review_id": {"type": "string", "description": "最近一次 ball_review 返回的 review_id"},
                 },
                 "required": ["packet_id"],
             },
@@ -534,16 +599,24 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
         {
             "name": "ball_release",
             "description": (
-                "放弃这一包换下一个（释放租约）。本地已写的 labels.json 留着，"
-                "下次领到同一包能接着用。"
+                "放弃这一包（释放租约）。本地 labels.json 留着。用 reason_code 说明原因："
+                "cannot_locate / lost_after_occlusion / ambiguous_match_ball 是标注困难，"
+                "同一方法 24 小时内不会再领到；download_error / decode_error 是基础设施失败，"
+                "短冷却后可重试；user_stop 是用户叫停。note 写一句证据。用户说本包后停就不再领下一包。"
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "packet_id": {"type": "string"},
-                    "reason": {"type": "string", "description": "为什么放弃，会记到服务端"},
+                    "reason_code": {
+                        "type": "string",
+                        "enum": ["cannot_locate", "lost_after_occlusion", "ambiguous_match_ball",
+                                 "download_error", "decode_error", "user_stop"],
+                    },
+                    "note": {"type": "string", "description": "一句话证据，如「37118 后传中丢球」"},
+                    "reason": {"type": "string", "description": "旧接口：自由文本原因（有 reason_code 时可不填）"},
                 },
-                "required": ["packet_id", "reason"],
+                "required": ["packet_id"],
             },
             "handler": t_release,
         },
@@ -554,10 +627,15 @@ def _tools(sess_get: Callable[[], AgentSession]) -> List[dict]:
 
 
 class McpServer:
-    def __init__(self, session_factory: Callable[[], AgentSession]) -> None:
+    def __init__(self, session_factory: Callable[[], AgentSession],
+                 inline_images: bool = False, inline_max: int = 4, xy_unit: str = "px") -> None:
         self._factory = session_factory
+        # 读不了本地文件的 harness（dsh）要把图直接放进工具结果
+        self.inline_images = bool(inline_images)
+        self.inline_max = max(1, int(inline_max))
         self._session: Optional[AgentSession] = None
-        self.tools = _tools(self._session_get)
+        self.xy_unit = xy_unit
+        self.tools = _tools(self._session_get, xy_unit)
         self._by_name = {t["name"]: t for t in self.tools}
         self.initialized = False
 
@@ -609,10 +687,12 @@ class McpServer:
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
             "instructions": (
                 "足球 GT 标注：ball_lease → ball_status 等 ready → ball_plan。"
-                "冷启动 ball_overview 看人 + ball_scan 读轨迹；之后对 query_frames "
-                "ball_strip(240–480) 看上下文，ball_label(roi_xy) 直接标球心；"
-                "读取 labels 画叠加与连线复核 → ball_submit(visual_reviewed=true)，source=ai 进审核。"
-                "视频路线通了用 ball_video。只标比赛用球；球可以是静止的；看不见就 absent。"
+                "冷启动 ball_overview 看人 + ball_scan 读轨迹，先确认比赛球身份；"
+                "之后逐帧 ball_view(mode='coord')（默认单帧 2×），ball_label(view_id+image_xy 或 roi_xy) "
+                f"直接标球心（{_unit_text(self.xy_unit)}）；标满后 ball_review 逐页看实际保存的标签与轨迹，改完重跑 → "
+                "ball_submit(visual_reviewed=true, review_id)，source=ai 进审核。"
+                "只标比赛用球；球可以是静止的；看不见就 absent，没看过的帧留空。"
+                "找不到比赛球就 ball_release(reason_code=...)。nominate/fit/follow/commit 是旧路线。"
             ),
         }
 
@@ -644,7 +724,33 @@ class McpServer:
                 ],
                 "isError": False,
             }
+        if self.inline_images and out.get("image_paths"):
+            return self._inline(out)
         return _tool_text(_dump(out), is_error=False)
+
+    def _inline(self, out: dict) -> dict:
+        """前 inline_max 张图作为 image 块，其余列出 path，按 view_id 用 ball_view_image 取。"""
+        paths = [str(x) for x in out.get("image_paths") or []]
+        blocks: List[dict] = []
+        shown: List[str] = []
+        for path in paths[: self.inline_max]:
+            try:
+                raw = Path(path).read_bytes()
+            except OSError as e:
+                log.warning("内联图读取失败 %s: %s", path, e)
+                continue
+            blocks.append({"type": "image", "data": base64.b64encode(raw).decode("ascii"),
+                           "mimeType": "image/png"})
+            shown.append(path)
+        rest = paths[len(shown):]
+        meta = {**out, "inlined": shown}
+        if rest:
+            meta["not_inlined"] = rest
+            meta["inline_note"] = (
+                f"只内联了前 {len(shown)} 张；其余 {len(rest)} 张按页面列表里的 view_id 调 "
+                "ball_view_image 逐页取，不要跳过"
+            )
+        return {"content": blocks + [{"type": "text", "text": _dump(meta)}], "isError": False}
 
 
 def _dump(obj: Any) -> str:
@@ -711,6 +817,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--model", default=os.environ.get("BALL_GT_MODEL") or "",
                    help="agent 用的模型名，记进 AI 标记")
     p.add_argument("--model-version", default=os.environ.get("BALL_GT_MODEL_VERSION") or "")
+    p.add_argument("--inline-images", action="store_true",
+                   default=os.environ.get("BALL_GT_INLINE_IMAGES") == "1",
+                   help="出图工具直接返回 image 块（dsh 等读不了本地文件的 harness 用）")
+    p.add_argument("--inline-max", type=int, default=4, help="单次工具结果最多内联几张图")
+    p.add_argument("--xy-unit", choices=["px", "n1000"], default=os.environ.get("BALL_GT_XY_UNIT") or "px",
+                   help="ball_label(image_xy) 默认单位；deepseek-flash / mimo 读点用 n1000 更准")
+    p.add_argument("--page-px", type=int, nargs=2, default=[1288, 1288], metavar=("W", "H"),
+                   help="coord / review 页面像素上限；超过查看器的缩放阈值会让 image_xy 失真")
     return p.parse_args(argv)
 
 
@@ -733,11 +847,11 @@ def main(argv=None) -> int:
     def factory() -> AgentSession:
         api = ServerClient(a.server, token=a.token, worker=a.worker)
         return AgentSession(api, work_root=a.work, worker=a.worker, hb_interval=a.hb_interval,
-                            method=method)
+                            method=method, page_px=a.page_px, xy_unit=a.xy_unit)
 
     log.info("MCP stdio 就绪 server=%s worker=%s work=%s method=%s",
              a.server, a.worker, a.work, {k: v for k, v in method.items() if v} or "未配置")
-    return serve(McpServer(factory))
+    return serve(McpServer(factory, inline_images=a.inline_images, inline_max=a.inline_max, xy_unit=a.xy_unit))
 
 
 if __name__ == "__main__":

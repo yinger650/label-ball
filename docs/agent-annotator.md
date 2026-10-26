@@ -4,10 +4,13 @@
 
 ```
 ball_lease → ball_status(等 ready) → ball_plan
-  → 冷启动：ball_overview + ball_scan
-  → query_frames：ball_strip(240–480) + ball_nominate
-  → ball_fit → ball_follow → ball_commit → ball_submit(source=ai)
+  → 冷启动：ball_overview + ball_scan（确认比赛球）
+  → ball_view(mode=coord) → ball_label(view_id, image_xy) / ball_absent   （逐页推进到标满）
+  → ball_review（叠加 / 缺球邻帧 / 轨迹）→ 改标后重跑
+  → ball_submit(visual_reviewed=true, review_id)            找不到球：ball_release(reason_code)
 ```
+
+2026-10-22 起这是默认路线（MCP 1.3.0）。下文的 strip + nominate → fit → follow → commit 是旧路线，工具保留做兼容。第一版固定 harness 为 DeepSeek Harness + deepseek-flash，见 `skills/ball-label/adapters/dsh.md`。
 
 Server：`client/mcp_server.py`（标准库 stdio JSON-RPC 2.0，**不装 `mcp` SDK** —— `requirements.txt` 是服务端和客户端共用的，公网站部署会照它装，加依赖会污染只该有 flask/waitress 的生产环境）。数据面：`client/agent_core.py`。skill：`skills/ball-label/`。
 
@@ -50,11 +53,12 @@ bash skills/ball-label/install.sh
 | `ball_fit` / `ball_follow` / `ball_commit` | `packet_id` | 拟合 → 复核 → 过门写入 |
 | `ball_absent` | `packet_id`, `frames` | 标不可见 |
 | `ball_video` | `packet_id`, `fps?=1`, `x0?`… | 目标帧重编视频，第 t 秒 = 第 t 个目标帧 |
-| `ball_view` | `packet_id`, `frame_idx`, `mode?`, `center?`, `size?`, `cols?`, `rows?` | 旧出图通道（`global` / `crop` / `time_grid`） |
+| `ball_view` | `packet_id`, `frame_idx`, `mode?`, `center?`, `size?`, `frames?`, `scale?`, `cols?`, `rows?` | 出图；默认 `mode="coord"` 多帧坐标页（共享中心，1288 px 内），另有 `global` / `crop` / `time_grid` |
 | `ball_view_image` | `view_id`, `index?=0` | 同一 `view_id` 的一张图以 MCP 内联 `image` 返回 |
-| `ball_label` | `packet_id`, `frame_idx`, `view_id?`, `cell?`… | 写单帧标注（旁路；新流程用 nominate/commit） |
-| `ball_submit` | `packet_id`, `force?` | `build_result` + `submit(source="ai")`，过闸门，进审核 |
-| `ball_release` | `packet_id`, `reason` | 放弃换包 |
+| `ball_label` | `packet_id`, `frame_idx`, `view_id?`, `image_xy?`, `roi_xy?`, `cell?`… | 写单帧标注；`image_xy` 是页面像素，按 view 换算并校验帧号 |
+| `ball_review` | `packet_id`, `frames?`, `size?`, `scale?` | 逐帧叠加页 + 缺球邻帧对照 + 轨迹连线，返回 `review_id` |
+| `ball_submit` | `packet_id`, `visual_reviewed?`, `review_id?`, `force?` | `build_result` + `submit(source="ai")`，进审核；复核快照过期只告警，写 `receipt.json` |
+| `ball_release` | `packet_id`, `reason_code?`, `note?`, `reason?` | 放弃换包；难包同方法冷却 24h，故障同 worker 冷却 15 分钟 |
 
 `ball_view`：`mode="global"` 横切 3 段 1:1；`mode="crop"` 方窗（主力 240–480 px）；`mode="time_grid"` 连续 9 帧，默认每格 **240 px**（`views.TIME_GRID_SIZE`）。`ball_strip` 默认 **6×6**；旧 crop 默认仍是 8×8。坐标都是 **ROI 局部像素**。
 

@@ -1,0 +1,51 @@
+# 国产模型投票标注用的四家。key 只从环境变量读，不要把 key 写进这个文件。
+# 各家用 2026-10-22 读点对比里的最佳单帧配置（见 artifacts/label-trials/vlm-compare-20261022/summary.md）。
+providers:
+  cmp_glm53_flash:
+    base_url: https://open.bigmodel.cn/api/coding/paas/v4
+    model: glm-5.3-flash
+    api_key_env: GLM_API
+    max_concurrency: 1
+    rpm: 30
+    timeout: 240
+    max_tokens: 4096
+    image_format: png
+    extra_body:
+      reasoning_effort: low
+
+  cmp_deepseek:
+    base_url: https://api.deepseek.com
+    model: deepseek-flash
+    api_key_env: DEEPSEEK_API
+    max_concurrency: 1
+    rpm: 30
+    timeout: 180
+    max_tokens: 2048
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+
+  cmp_mimo_pro:
+    base_url: https://token-plan-cn.xiaomimimo.com/v1
+    model: mimo-v2.6-pro
+    api_key_env: MIMO_API
+    max_concurrency: 1
+    rpm: 30
+    timeout: 180
+    max_tokens: 2048
+    image_format: png
+    extra_body:
+      thinking: {type: disabled}
+
+  cmp_minimax_m3:
+    base_url: https://api.minimaxi.com/v1
+    model: MiniMax-M3
+    api_key_env: MINIMA_API
+    max_concurrency: 1
+    rpm: 20
+    timeout: 180
+    max_tokens: 2048
+    image_format: png
+    detail: high
+    extra_body:
+      thinking: {type: disabled}

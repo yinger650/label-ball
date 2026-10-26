@@ -46,6 +46,9 @@ LEASE_TTL_REPAIR = 12 * 3600
 # 同一 worker 刚因 no_seed / 处理失败释放的包，冷却期内不再发给他。
 # 否则客户端会立刻领回同一个最老的 available 包，空转打爆租约表。
 FAIL_COOLDOWN_SEC = 15 * 60
+# 标注困难（`hard:*`，如冷启动找不到比赛球）释放的包，同一标注方法冷却更久：
+# 换个上下文重领也还是同一个模型，立刻发回只会再释放一次。其他方法和人工不受影响。
+HARD_COOLDOWN_SEC = int(os.environ.get("BALL_GT_HARD_COOLDOWN_SEC") or 24 * 3600)
 
 PACKET_STATES = ("available", "leased", "submitted", "accepted", "need_human", "archived")
 LEASE_KINDS = ("ai", "human", "repair")
@@ -602,13 +605,9 @@ def pick_packet(
         "                  AND m.worker=?) "
     )
     # 刚失败释放的包先让给别人 / 等冷却；repair 不受这条限制
+    cooled = [] if kind == "repair" else cooled_packets(c, worker, method)
     fail_cool = (
-        "" if kind == "repair" else
-        "  AND NOT EXISTS (SELECT 1 FROM leases f WHERE f.packet_id=p.packet_id "
-        "                  AND f.worker=? AND f.released_at IS NOT NULL "
-        "                  AND f.released_at > ? "
-        "                  AND (f.released_reason='no_seed' "
-        "                       OR f.released_reason LIKE 'error:%')) "
+        "  AND p.packet_id NOT IN (" + ",".join("?" * len(cooled)) + ") " if cooled else ""
     )
     # AI 优先领人类预标过的包，好跳过冷启动
     order = (
@@ -621,7 +620,7 @@ def pick_packet(
     for st in want_states:
         args = [st, kind]
         if kind != "repair":
-            args += [worker, worker, now() - FAIL_COOLDOWN_SEC]
+            args += [worker, *cooled]
         base = "SELECT * FROM packets p WHERE p.state=? " + no_pending_ai + not_mine + fail_cool
         r = one(
             c,
@@ -1128,9 +1127,53 @@ def delete_packets(
 
 
 def is_fail_release(reason: Optional[str]) -> bool:
-    """no_seed / 处理异常的释放：不算真正消耗，也不该立刻再发给同一 worker。"""
+    """no_seed / 处理异常的释放：不算真正消耗。和池深 / 消耗率 SQL 的口径一致。"""
     s = str(reason or "")
     return s == "no_seed" or s.startswith("error:")
+
+
+_INFRA_WORDS = ("download", "decode", "getobject")
+_HARD_WORDS = ("cannot_locate", "cannot_reliably", "ambiguous", "lost_after")
+
+
+def classify_release(reason: Optional[str]) -> str:
+    """释放原因归类：infra（下载 / 解码等基础设施失败）、hard（标注困难）、normal。
+
+    新客户端发 `error:<code>` / `hard:<code>`；旧客户端的自由文本按关键词兜底。
+    """
+    s = str(reason or "").strip().lower()
+    if s == "no_seed" or s.startswith("error:"):
+        return "infra"
+    if s.startswith("hard:"):
+        return "hard"
+    if any(w in s for w in _INFRA_WORDS):
+        return "infra"
+    if any(s.startswith(w) or f"_{w}" in s for w in _HARD_WORDS):
+        return "hard"
+    return "normal"
+
+
+def cooled_packets(c: sqlite3.Connection, worker: str, method: Optional[str]) -> List[str]:
+    """冷却中、不该发给这个 worker / 方法的包。
+
+    infra：同一 worker 15 分钟；hard：同一方法（没有方法键时按 worker）24 小时。
+    """
+    t = now()
+    out = set()
+    for r in rows(
+        c,
+        "SELECT packet_id, worker, method, released_at, released_reason FROM leases "
+        "WHERE released_at IS NOT NULL AND released_at > ? AND released_reason IS NOT NULL",
+        (t - max(FAIL_COOLDOWN_SEC, HARD_COOLDOWN_SEC),),
+    ):
+        k = classify_release(r["released_reason"])
+        if k == "infra" and r["worker"] == worker and r["released_at"] > t - FAIL_COOLDOWN_SEC:
+            out.add(r["packet_id"])
+        elif k == "hard" and r["released_at"] > t - HARD_COOLDOWN_SEC:
+            same = (r["method"] == method) if method else (r["worker"] == worker)
+            if same:
+                out.add(r["packet_id"])
+    return sorted(out)
 
 
 # ---------------------------------------------------------------- GT
@@ -1268,6 +1311,31 @@ def rate_per_h(c: sqlite3.Connection, sql: str, args: Sequence = (), window_h: f
     return round(n / window_h, 2)
 
 
+def schedulable_available(c: sqlite3.Connection) -> Dict[str, int]:
+    """Keep fresh stock for each recent AI consumer, including consumers now starved.
+
+    Raw available includes method-blocked and cooling packets. Counting those as
+    stock prevents production precisely when all annotators can no longer lease.
+    A 24h consumer window matches the hard cooldown; new packets remain eligible
+    for these consumers, so production is still bounded by keep_available.
+    """
+    available = rows(c, "SELECT packet_id, blocked_methods_json FROM packets WHERE state='available'")
+    consumers = rows(c, "SELECT worker, method FROM leases WHERE kind='ai' "
+                     "AND method IS NOT NULL AND method<>'' GROUP BY worker, method "
+                     "HAVING MAX(COALESCE(last_heartbeat, created_at))>=?", (now()-HARD_COOLDOWN_SEC,))
+    pending = {r['packet_id'] for r in rows(c, "SELECT DISTINCT packet_id FROM submissions "
+                                         "WHERE source='ai' AND state='pending'")}
+    capacity = len(available)
+    for consumer in consumers:
+        worker, method = consumer['worker'], consumer['method']
+        excluded = set(cooled_packets(c, worker, method)) | pending
+        excluded.update(r['packet_id'] for r in rows(c,
+                        "SELECT DISTINCT packet_id FROM submissions WHERE worker=?", (worker,)))
+        eligible = sum(p['packet_id'] not in excluded and not method_blocked(p, method) for p in available)
+        capacity = min(capacity, eligible)
+    return {'n_schedulable': capacity, 'n_recent_ai_consumers': len(consumers)}
+
+
 def pool_view(c: sqlite3.Connection, keep_available: int, batch: int, window_h: float = 1.0) -> Dict[str, Any]:
     """`GET /api/v2/pool` 的正文，也是产包端补池的**控制信号**。
 
@@ -1278,6 +1346,7 @@ def pool_view(c: sqlite3.Connection, keep_available: int, batch: int, window_h: 
     expire_leases(c)
     cnt = pool_counts(c)
     n_avail = cnt["available"]
+    capacity = schedulable_available(c)
     produce = rate_per_h(c, "SELECT COUNT(*) FROM packets WHERE created_at >= ?", (), window_h)
     consume = rate_per_h(
         c,
@@ -1288,10 +1357,11 @@ def pool_view(c: sqlite3.Connection, keep_available: int, batch: int, window_h: 
         window_h,
     )
     net = consume - produce
-    eta = round(n_avail / net * 60, 1) if net > 0.01 else None
-    want = max(0, keep_available - n_avail)
+    eta = round(capacity['n_schedulable'] / net * 60, 1) if net > 0.01 else None
+    want = max(0, keep_available - capacity['n_schedulable'])
     return {
         "n_available": n_avail,
+        **capacity,
         "n_leased": cnt["leased"],
         "n_pending_review": cnt["n_pending_review"],
         "n_submitted": cnt["submitted"],
